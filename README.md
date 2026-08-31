@@ -1,22 +1,66 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# PurpClaw Mobile
 
-# Run and deploy your AI Studio app
+PurpClaw becomes delegated work on a phone: give yourself a job, put the phone in your
+pocket, come back when done.
 
-This contains everything you need to run your app locally.
+## Delegation model
 
-View your app in AI Studio: https://ai.studio/apps/f3f8f735-e98c-4638-85ea-c2c16c2ffb4e
+```text
+  🎙️ Voice request or text
+        │
+        ▼
+  WorkSession (persistent; survives AppWidget / transaction / Service)
+        │
+        ▼
+  plan + acceptance + providers
+        │
+        ▼
+  EXECUTE ── WorkManager (deferrable/retryable) OR foreground service (active)
+        │
+        ▼
+  VERIFY ── completion gates on evidence, not model boredom
+        │
+        ▼
+  NOTIFICATION ── [OPEN CODE] [OPEN RESULT] [RECEIPT] [RESUME] [CANCEL]
+```
 
-## Run Locally
+## Build
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+**Prerequisites:** Android Studio (or the standalone Gradle 9.3.1 binary) + Android SDK.
 
+### Gradle
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+```bash
+# Direct 9.3.1 binary (wrapper in this repo is missing)
+/c/Users/Admin/.gradle/wrapper/dists/gradle-9.3.1-bin/23ovyewtku6u96viwx3xl3oks/gradle-9.3.1/bin/gradle \
+  --no-daemon --project-dir=. assembleDebug
+
+# Adjust the path for your machine's Gradle cache location.
+```
+
+Or open in Android Studio: `Select Open` → `purp mobile`.
+
+### Quick device install
+
+```bash
+adb -s RZCY9172MDP install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s RZCY9172MDP shell am start -n com.aistudio.purpclaw.osv7/com.example.MainActivity
+```
+
+## Package / activity
+
+| Component                 | Purpose                                  |
+| ------------------------- | ---------------------------------------- |
+| `com.aistudio.purpclaw`   | Application root                         |
+| `app-debug.apk`           | 253 MB debug build                       |
+| `com.example.MainActivity` | Entry surface (Galaxy/Compose)           |
+
+## Hardware quarantine
+
+`libpenguin.so` (gltfio spine) is dlopen-error-quarantined on the Samsung S25 (Adreno 830,
+2026-08-28). It is expected at app start, expected to not crash the process; the 2D fallback
+remains active and intentional.
+
+## Status
+
+Build verified 2026-08-31. APK `app-debug.apk` at `app/build/outputs/apk/debug/`.
