@@ -1,0 +1,42 @@
+Calculating task graph as no cached configuration is available for tasks: compileDebugKotlin
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+Exception in thread "AWT-EventQueue-0" java.lang.NullPointerException: Cannot invoke "ksp.com.intellij.openapi.application.Application.getService(java.lang.Class)" because the return value of "ksp.com.intellij.openapi.application.ApplicationManager.getApplication()" is null
+	at ksp.com.intellij.openapi.fileEditor.FileDocumentManager.getInstance(FileDocumentManager.java:35)
+	at ksp.com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers.lambda$notifyDecompilerSetChange$1(BinaryFileTypeDecompilers.java:29)
+	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:318)
+> Task :app:kspDebugKotlin
+	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
+	at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
+	at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
+	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
+	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
+	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+> Task :app:compileDebugKotlin
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/network/HomeRuntimeBridge.kt:299:61 Java type mismatch: inferred type is 'Nothing?', but 'String' was expected.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/network/HomeRuntimeBridge.kt:451:61 Java type mismatch: inferred type is 'Nothing?', but 'String' was expected.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/runtime/ToolRuntimeEngine.kt:589:61 'static field VIBRATOR_SERVICE: String' is deprecated. Deprecated in Java.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/runtime/ToolRuntimeEngine.kt:1112:11 Unchecked cast of 'Map<*, *>' to 'Map<Any?, Any?>'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:527:6 This declaration needs opt-in. Its usage should be marked with '@kotlinx.coroutines.ExperimentalCoroutinesApi' or '@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)'
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:1886:26 This extension is shadowed by a member: 'fun toEntity(): ProofReceiptEntity' defined in 'com/example/core/model/ProofReceipt'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/MessageActionBar.kt:141:32 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:53:11 Check for instance is always 'true'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:79:46 'val Icons.Filled.Launch: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Launch.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:83:67 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:89:76 'val Icons.Filled.Launch: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Launch.
+
+BUILD SUCCESSFUL in 2m 24s
+8 actionable tasks: 2 executed, 6 up-to-date
+Configuration cache entry stored.

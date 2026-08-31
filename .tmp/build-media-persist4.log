@@ -1,0 +1,237 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:parseDebugLocalResources
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:javaPreCompileDebug
+> Task :app:generateDebugRFile
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:checkDebugDuplicateClasses
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:compileDebugNavigationResources
+> Task :app:mergeLibDexDebug
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:processDebugMainManifest
+> Task :app:mergeDebugResources
+> Task :app:processDebugManifest
+> Task :app:mergeDebugJniLibFolders
+> Task :app:processDebugManifestForPackage
+> Task :app:kspDebugKotlin
+> Task :app:mergeExtDexDebug
+> Task :app:processDebugResources
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:mergeDebugNativeLibs
+> Task :app:writeDebugSigningConfigVersions
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libimage_processing_util_jni.so, libsurface_util_jni.so. Run with --info option to learn more.
+ERROR: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug: D8: java.nio.file.NoSuchFileException: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug
+
+> Task :app:mergeExtDexDebug
+com.android.builder.dexing.DexArchiveMergerException: Error while merging dex archives: 
+	at com.android.builder.dexing.D8DexArchiveMerger.getMergingExceptionToRethrow(D8DexArchiveMerger.java:231)
+	at com.android.builder.dexing.D8DexArchiveMerger.mergeDexArchives(D8DexArchiveMerger.java:219)
+	at com.android.build.gradle.internal.tasks.DexMergingWorkAction.merge(DexMergingTask.kt:820)
+	at com.android.build.gradle.internal.tasks.DexMergingWorkAction.run(DexMergingTask.kt:775)
+	at com.android.build.gradle.internal.profile.ProfileAwareWorkAction.execute(ProfileAwareWorkAction.kt:66)
+	at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:68)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:64)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:61)
+	at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:102)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:61)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
+	at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:58)
+	at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:176)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
+	at org.gradle.internal.Factories$1.create(Factories.java:30)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.lambda$withLocksAcquired$0(DefaultWorkerLeaseService.java:269)
+	at org.gradle.internal.work.ResourceLockStatistics$1.measure(ResourceLockStatistics.java:42)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocksAcquired(DefaultWorkerLeaseService.java:267)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:259)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:47)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: com.android.tools.r8.CompilationFailedException: Compilation failed to complete, origin: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug
+	at Version.fakeStackEntry(Version_9.1.31.java:0)
+	at com.android.tools.r8.r0.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:1)
+	at com.android.tools.r8.internal.lw0.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:81)
+	at com.android.tools.r8.internal.lw0.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:32)
+	at com.android.tools.r8.internal.lw0.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:31)
+	at com.android.tools.r8.internal.lw0.b(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:2)
+	at com.android.tools.r8.D8.run(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:11)
+	at com.android.builder.dexing.D8DexArchiveMerger.mergeDexArchives(D8DexArchiveMerger.java:217)
+	... 40 more
+Caused by: java.nio.file.NoSuchFileException: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug
+	at java.base/sun.nio.fs.WindowsException.translateToIOException(WindowsException.java:85)
+	at java.base/sun.nio.fs.WindowsException.rethrowAsIOException(WindowsException.java:103)
+	at java.base/sun.nio.fs.WindowsException.rethrowAsIOException(WindowsException.java:108)
+	at java.base/sun.nio.fs.WindowsDirectoryStream.<init>(WindowsDirectoryStream.java:86)
+	at java.base/sun.nio.fs.WindowsFileSystemProvider.newDirectoryStream(WindowsFileSystemProvider.java:541)
+	at java.base/java.nio.file.Files.newDirectoryStream(Files.java:482)
+	at java.base/java.nio.file.Files.list(Files.java:3785)
+	at org.gradle.internal.classpath.declarations.NioFileInterceptors.intercept_list(NioFileInterceptors.java:275)
+	at com.android.tools.r8.DexIndexedConsumer$DirectoryConsumer.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:1)
+	at com.android.tools.r8.DexIndexedConsumer$DirectoryConsumer.accept(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:8)
+	at com.android.tools.r8.dex.j.b(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:60)
+	at com.android.tools.r8.dex.j.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:150)
+	at com.android.tools.r8.internal.eg4.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:2)
+	at com.android.tools.r8.internal.eg4.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:17)
+	at java.base/java.util.concurrent.ForkJoinTask$AdaptedCallable.exec(ForkJoinTask.java:1456)
+	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:387)
+	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1312)
+	at java.base/java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:1843)
+	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:1808)
+	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:188)
+	Suppressed: java.lang.RuntimeException: com.android.tools.r8.internal.j: java.nio.file.NoSuchFileException: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug
+		at com.android.tools.r8.internal.yp3.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:27)
+		at com.android.tools.r8.dex.j.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:259)
+		at com.android.tools.r8.D8.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:113)
+		at com.android.tools.r8.D8.d(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:151)
+		at com.android.tools.r8.D8.b(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:1)
+		at com.android.tools.r8.internal.lw0.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:28)
+		at com.android.tools.r8.internal.lw0.b(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:2)
+		at com.android.tools.r8.D8.run(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:11)
+		at com.android.builder.dexing.D8DexArchiveMerger.mergeDexArchives(D8DexArchiveMerger.java:217)
+		at com.android.build.gradle.internal.tasks.DexMergingWorkAction.merge(DexMergingTask.kt:820)
+		at com.android.build.gradle.internal.tasks.DexMergingWorkAction.run(DexMergingTask.kt:775)
+		at com.android.build.gradle.internal.profile.ProfileAwareWorkAction.execute(ProfileAwareWorkAction.kt:66)
+		at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:68)
+		at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:64)
+		at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:61)
+		at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:102)
+		at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:61)
+		at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
+		at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+		at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
+		at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
+		at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:58)
+		at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:176)
+		at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+		at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
+		at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
+		at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
+		at org.gradle.internal.Factories$1.create(Factories.java:30)
+		at org.gradle.internal.work.DefaultWorkerLeaseService.lambda$withLocksAcquired$0(DefaultWorkerLeaseService.java:269)
+		at org.gradle.internal.work.ResourceLockStatistics$1.measure(ResourceLockStatistics.java:42)
+		at org.gradle.internal.work.DefaultWorkerLeaseService.withLocksAcquired(DefaultWorkerLeaseService.java:267)
+		at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:259)
+		at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+		at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
+		at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
+		at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
+		at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572)
+		at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+		at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+		at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:47)
+		at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+		at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+		at java.base/java.lang.Thread.run(Thread.java:1583)
+	Caused by: com.android.tools.r8.internal.j: java.nio.file.NoSuchFileException: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug
+		at com.android.tools.r8.internal.yp3.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:21)
+		at com.android.tools.r8.internal.yp3.error(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:1)
+		at com.android.tools.r8.DexIndexedConsumer$DirectoryConsumer.accept(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:11)
+		at com.android.tools.r8.dex.j.b(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:60)
+		at com.android.tools.r8.dex.j.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:150)
+		at com.android.tools.r8.internal.eg4.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:2)
+		at com.android.tools.r8.internal.eg4.a(R8_9.1.31_ffb8f76e0cfe19f6a6aff10b55ad38bc82c7544bc91f5b7fd86bc80f9b2412e7:17)
+		at java.base/java.util.concurrent.ForkJoinTask$AdaptedCallable.exec(ForkJoinTask.java:1456)
+		at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:387)
+		at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1312)
+		at java.base/java.util.concurrent.ForkJoinPool.scan(ForkJoinPool.java:1843)
+		at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:1808)
+		at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:188)
+	Caused by: [CIRCULAR REFERENCE: java.nio.file.NoSuchFileException: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\dex\debug\mergeExtDexDebug]
+
+
+> Task :app:mergeExtDexDebug FAILED
+
+> Task :app:kspDebugKotlin FAILED
+e: [ksp] java.io.FileNotFoundException: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\kspCaches\debug\symbols (The system cannot find the path specified)
+Exception in thread "AWT-EventQueue-0" java.lang.NullPointerException: Cannot invoke "ksp.com.intellij.openapi.application.Application.getService(java.lang.Class)" because the return value of "ksp.com.intellij.openapi.application.ApplicationManager.getApplication()" is null
+	at ksp.com.intellij.openapi.fileEditor.FileDocumentManager.getInstance(FileDocumentManager.java:35)
+	at ksp.com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers.lambda$notifyDecompilerSetChange$1(BinaryFileTypeDecompilers.java:29)
+	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:318)
+	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
+	at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
+	at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
+	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
+	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
+	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':app:mergeExtDexDebug'.
+> A failure occurred while executing com.android.build.gradle.internal.tasks.DexMergingTaskDelegate
+   > There was a failure while executing work items
+      > A failure occurred while executing com.android.build.gradle.internal.tasks.DexMergingWorkAction
+         > com.android.builder.dexing.DexArchiveMergerException: Error while merging dex archives: 
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':app:kspDebugKotlin'.
+> A failure occurred while executing com.google.devtools.ksp.gradle.KspAAWorkerAction
+   > E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\kspCaches\debug\symbols (The system cannot find the path specified)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 1m 43s
+30 actionable tasks: 30 executed

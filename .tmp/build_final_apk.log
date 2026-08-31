@@ -1,0 +1,14 @@
+Reusing configuration cache.
+Daemon is stopping immediately stop command received
+Timed out waiting for finished message from client socket connection from /127.0.0.1:15043 to /127.0.0.1:11560. Discarding connection.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Gradle build daemon has been stopped: stop command received
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.

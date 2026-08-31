@@ -1,0 +1,126 @@
+{
+  "ok": true,
+  "reply": "pong",
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "provider": "openrouter",
+  "routingReceipt": {
+    "schema": "purpclaw.routing-receipt/1",
+    "route_id": "72923f6a-5825-421a-985d-0fb95aad9a6a",
+    "turn_id": null,
+    "session_id": "surface:chat",
+    "routing_mode": "MANUAL",
+    "requested": {
+      "provider": "AUTO",
+      "model": "AUTO"
+    },
+    "resolved": {
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free"
+    },
+    "attempted": [
+      {
+        "attempt_index": 0,
+        "provider": "openrouter",
+        "model": "nvidia/nemotron-3-super-120b-a12b:free",
+        "started_at": null,
+        "ended_at": null,
+        "latency_ms": null,
+        "outcome": "SERVED",
+        "failure_class": null,
+        "status_code": null,
+        "health_before": null,
+        "health_after": null,
+        "cooldown_applied_ms": 0
+      }
+    ],
+    "served": {
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free"
+    },
+    "fallback": {
+      "occurred": false,
+      "from_attempt": null,
+      "reason": null
+    },
+    "inference_node": "home-core",
+    "execution_node": null,
+    "manual_pin": {
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free"
+    },
+    "created_at": "2026-08-25T14:19:13.099Z"
+  },
+  "telemetry": {
+    "requestedProvider": "auto",
+    "requestedModel": "auto",
+    "provider": "openrouter",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "route": "CHAT",
+    "lease": null,
+    "toolCalls": 0,
+    "agentCalls": 0,
+    "skillCalls": 0,
+    "fallbackCount": 0,
+    "fallbackPath": [],
+    "providerAttempts": [],
+    "promptTokens": null,
+    "completionTokens": null,
+    "reasoningTokens": null,
+    "totalTokens": null,
+    "reasoningState": null,
+    "ttftMs": null,
+    "durationMs": null,
+    "status": "complete",
+    "routingReceipt": {
+      "schema": "purpclaw.routing-receipt/1",
+      "route_id": "72923f6a-5825-421a-985d-0fb95aad9a6a",
+      "turn_id": null,
+      "session_id": "surface:chat",
+      "routing_mode": "MANUAL",
+      "requested": {
+        "provider": "AUTO",
+        "model": "AUTO"
+      },
+      "resolved": {
+        "provider": "openrouter",
+        "model": "nvidia/nemotron-3-super-120b-a12b:free"
+      },
+      "attempted": [
+        {
+          "attempt_index": 0,
+          "provider": "openrouter",
+          "model": "nvidia/nemotron-3-super-120b-a12b:free",
+          "started_at": null,
+          "ended_at": null,
+          "latency_ms": null,
+          "outcome": "SERVED",
+          "failure_class": null,
+          "status_code": null,
+          "health_before": null,
+          "health_after": null,
+          "cooldown_applied_ms": 0
+        }
+      ],
+      "served": {
+        "provider": "openrouter",
+        "model": "nvidia/nemotron-3-super-120b-a12b:free"
+      },
+      "fallback": {
+        "occurred": false,
+        "from_attempt": null,
+        "reason": null
+      },
+      "inference_node": "home-core",
+      "execution_node": null,
+      "manual_pin": {
+        "provider": "openrouter",
+        "model": "nvidia/nemotron-3-super-120b-a12b:free"
+      },
+      "created_at": "2026-08-25T14:19:13.099Z"
+    }
+  },
+  "providerAttempts": [],
+  "modeOffer": null,
+  "sessionId": "surface:chat",
+  "historyTurns": 40
+}

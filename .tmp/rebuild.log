@@ -1,0 +1,60 @@
+Starting a Gradle Daemon, 5 busy and 23 stopped Daemons could not be reused, use --status for details
+Calculating task graph as no cached configuration is available for tasks: installDebug
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources FROM-CACHE
+> Task :app:javaPreCompileDebug FROM-CACHE
+> Task :app:packageDebugResources FROM-CACHE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources FROM-CACHE
+> Task :app:generateDebugRFile FROM-CACHE
+> Task :app:desugarDebugFileDependencies FROM-CACHE
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets FROM-CACHE
+> Task :app:mergeLibDexDebug FROM-CACHE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:compileDebugNavigationResources FROM-CACHE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:checkDebugAarMetadata
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug FROM-CACHE
+> Task :app:mergeDebugResources FROM-CACHE
+> Task :app:mergeDebugJniLibFolders
+> Task :app:mergeExtDexDebug FROM-CACHE
+> Task :app:processDebugMainManifest FROM-CACHE
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:mergeDebugNativeLibs
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:compileDebugKotlin FROM-CACHE
+> Task :app:processDebugManifest FROM-CACHE
+> Task :app:compileDebugJavaWithJavac FROM-CACHE
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libimage_processing_util_jni.so, libsurface_util_jni.so. Run with --info option to learn more.
+
+> Task :app:processDebugManifestForPackage FROM-CACHE
+> Task :app:processDebugJavaRes
+> Task :app:processDebugResources FROM-CACHE
+> Task :app:mergeDebugJavaResource
+> Task :app:dexBuilderDebug FROM-CACHE
+> Task :app:mergeProjectDexDebug FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:mergeProjectDexDebug'.
+> Directory does not exist: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\mixed_scope_dex_archive\debug\dexBuilderDebug\out
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 2m 37s
+36 actionable tasks: 14 executed, 19 from cache, 3 up-to-date
+Configuration cache entry stored.

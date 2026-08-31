@@ -1,0 +1,130 @@
+Reusing configuration cache.
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+Exception in thread "AWT-EventQueue-0" java.lang.NullPointerException: Cannot invoke "ksp.com.intellij.openapi.application.Application.getService(java.lang.Class)" because the return value of "ksp.com.intellij.openapi.application.ApplicationManager.getApplication()" is null
+	at ksp.com.intellij.openapi.fileEditor.FileDocumentManager.getInstance(FileDocumentManager.java:35)
+	at ksp.com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers.lambda$notifyDecompilerSetChange$1(BinaryFileTypeDecompilers.java:29)
+	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:318)
+	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
+	at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
+	at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
+	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
+	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
+	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/database/PurpClawDatabase.kt:418:11 'fun fallbackToDestructiveMigration(): RoomDatabase.Builder<PurpClawDatabase>' is deprecated. Replace by overloaded version with parameter to indicate if all tables should be dropped or not.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/network/HomeRuntimeBridge.kt:231:47 Java type mismatch: inferred type is 'Nothing?', but 'String' was expected.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/network/HomeRuntimeBridge.kt:232:41 Java type mismatch: inferred type is 'Nothing?', but 'String' was expected.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/runtime/ToolRuntimeEngine.kt:417:61 'static field VIBRATOR_SERVICE: String' is deprecated. Deprecated in Java.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:1077:26 This extension is shadowed by a member: 'fun toEntity(): ProofReceiptEntity' defined in 'com/example/core/model/ProofReceipt'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/DualViewBrowser.kt:80:30 'val Icons.Filled.ArrowBack: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ArrowBack.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/DualViewBrowser.kt:83:30 'val Icons.Filled.ArrowForward: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ArrowForward.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:53:11 Check for instance is always 'true'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/CommandScreen.kt:378:100 'val Icons.Filled.Send: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Send.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:79:46 'val Icons.Filled.Launch: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Launch.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:83:67 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:89:76 'val Icons.Filled.Launch: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Launch.
+
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+
+> Task :app:dexBuilderDebug
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\dirs_bucket_0\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\dirs_bucket_1\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\dirs_bucket_3\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\jar_11771dde290d87c9b986a0a66f46ef0c7c6cac09509e90d2bd0bcfa4ec9a22fa_bucket_0\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\jar_11771dde290d87c9b986a0a66f46ef0c7c6cac09509e90d2bd0bcfa4ec9a22fa_bucket_1\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\jar_11771dde290d87c9b986a0a66f46ef0c7c6cac09509e90d2bd0bcfa4ec9a22fa_bucket_2\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\jar_11771dde290d87c9b986a0a66f46ef0c7c6cac09509e90d2bd0bcfa4ec9a22fa_bucket_3\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\otherProjects\dirs_bucket_0\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\otherProjects\dirs_bucket_1\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\otherProjects\dirs_bucket_2\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\otherProjects\dirs_bucket_3\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\mixedScopes\dirs_bucket_0\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\mixedScopes\dirs_bucket_1\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\mixedScopes\dirs_bucket_2\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\mixedScopes\dirs_bucket_3\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\externalLibs\dirs_bucket_0\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\externalLibs\dirs_bucket_1\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\externalLibs\dirs_bucket_2\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\externalLibs\dirs_bucket_3\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+Failed to read desugaring graph. Cause: FileNotFoundException, message: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\desugar_graph\debug\dexBuilderDebug\out\currentProject\dirs_bucket_2\graph.bin (The system cannot find the path specified).
+Fall back to non-incremental mode.
+
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:packageDebug'.
+> A failure occurred while executing com.android.build.gradle.tasks.PackageAndroidArtifact$IncrementalSplitterRunnable
+   > Could not find EOCD in 'E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\outputs\apk\debug\app-debug.apk'
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 5m 46s
+37 actionable tasks: 5 executed, 32 up-to-date
+Configuration cache entry reused.

@@ -1,0 +1,2 @@
+Starting a Gradle Daemon, 3 busy and 2 stopped Daemons could not be reused, use --status for details
+Calculating task graph as no cached configuration is available for tasks: installDebug

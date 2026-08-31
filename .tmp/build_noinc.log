@@ -1,0 +1,25 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as configuration cache cannot be reused because Gradle property 'android.enableDexingArtifactTransform' has changed.
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file 'E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build.gradle.kts' line: 1
+
+* What went wrong:
+An exception occurred applying plugin request [id: 'com.android.application', version: '9.1.1']
+> Failed to apply plugin 'com.android.internal.application'.
+   > The option 'android.enableDexingArtifactTransform' is deprecated.
+     The current default is 'true'.
+     It was removed in version 8.3 of the Android Gradle plugin.
+     If you run into issues with dexing transforms, try setting `android.useFullClasspathForDexingTransform = true` instead.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 21s
+Configuration cache entry stored.

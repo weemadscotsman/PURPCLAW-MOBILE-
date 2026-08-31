@@ -1,0 +1,16 @@
+Calculating task graph as no cached configuration is available for tasks: installDebug
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\.gradle\configuration-cache\d0d82e31-0ffa-4395-95cb-37cec9b3e33a\.strings.work.bin (The system cannot find the file specified)
+> E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\.gradle\configuration-cache\d0d82e31-0ffa-4395-95cb-37cec9b3e33a\.strings.work.bin (The system cannot find the file specified)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 42s
+Configuration cache entry stored.

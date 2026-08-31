@@ -1,0 +1,57 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+A problem occurred configuring root project 'PurpClaw'.
+> Multiple build operations failed.
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      ...and 119 more failures.
+   > Could not isolate parameters org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of artifact transform MergeInstrumentationAnalysisTransform
+      > Could not isolate value org.gradle.api.internal.initialization.transform.MergeInstrumentationAnalysisTransform$Parameters_Decorated@2dfc1461 of type MergeInstrumentationAnalysisTransform.Parameters
+         > Multiple build operations failed.
+               Timeout waiting to lock cache directory 04c9b6de10ca86c03a82b5f423536277 (C:\Users\Admin\.gradle\caches\9.3.1\transforms\04c9b6de10ca86c03a82b5f423536277). It is currently in use by another process.
+           Owner PID: 9956
+           Our PID: 18820
+           Owner Operation: 
+           Our operation: 
+           Lock file: C:\Users\Admin\.gradle\caches\9.3.1\transforms\04c9b6de10ca86c03a82b5f423536277\04c9b6de10ca86c03a82b5f423536277.lock
+               Timeout waiting to lock cache directory e50842ba5ac6688673e2df777eae2817 (C:\Users\Admin\.gradle\caches\9.3.1\transforms\e50842ba5ac6688673e2df777eae2817). It is currently in use by another process.
+           Owner PID: 9956
+           Our PID: 18820
+           Owner Operation: 
+           Our operation: 
+           Lock file: C:\Users\Admin\.gradle\caches\9.3.1\transforms\e50842ba5ac6688673e2df777eae2817\e50842ba5ac6688673e2df777eae2817.lock
+            > Timeout waiting to lock cache directory 04c9b6de10ca86c03a82b5f423536277 (C:\Users\Admin\.gradle\caches\9.3.1\transforms\04c9b6de10ca86c03a82b5f423536277). It is currently in use by another process.
+              Owner PID: 9956
+              Our PID: 18820
+              Owner Operation: 
+              Our operation: 
+              Lock file: C:\Users\Admin\.gradle\caches\9.3.1\transforms\04c9b6de10ca86c03a82b5f423536277\04c9b6de10ca86c03a82b5f423536277.lock
+            > Timeout waiting to lock cache directory e50842ba5ac6688673e2df777eae2817 (C:\Users\Admin\.gradle\caches\9.3.1\transforms\e50842ba5ac6688673e2df777eae2817). It is currently in use by another process.
+              Owner PID: 9956
+              Our PID: 18820
+              Owner Operation: 
+              Our operation: 
+              Lock file: C:\Users\Admin\.gradle\caches\9.3.1\transforms\e50842ba5ac6688673e2df777eae2817\e50842ba5ac6688673e2df777eae2817.lock
+> There are 256 more failures with identical causes.
+
+* Try:
+> Run the 'artifactTransforms' report task to view details about registered transforms.
+> Review the documentation on Artifact Transforms at https://docs.gradle.org/9.3.1/userguide/artifact_transforms.html.
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 3m 2s

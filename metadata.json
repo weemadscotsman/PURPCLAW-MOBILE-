@@ -1,0 +1,6 @@
+{
+  "name": "PurpClaw",
+  "description": "PurpClaw Sovereign Agentic AI OS for Android with Shared Mission Canvas, Home-First Session Mesh, 7-layer memory, and multi-mode execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

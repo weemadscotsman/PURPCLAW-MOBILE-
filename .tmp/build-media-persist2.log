@@ -1,0 +1,138 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:parseDebugLocalResources
+> Task :app:generateDebugRFile
+> Task :app:javaPreCompileDebug
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:checkDebugDuplicateClasses
+> Task :app:desugarDebugFileDependencies
+> Task :app:kspDebugKotlin
+> Task :app:mergeExtDexDebug
+> Task :app:mergeLibDexDebug
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:compileDebugNavigationResources
+> Task :app:compileDebugKotlin
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:mergeDebugJniLibFolders
+
+> Task :app:compileDebugKotlin
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:849:27 Variable expected.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:849:27 Only expressions are allowed in this context.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:879:9 Syntax error: Expecting an expression.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:879:9 Syntax error: Expecting ')'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:879:13 Unresolved reference 'turnReceipt'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:879:25 Syntax error: Expecting an element.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:879:41 Syntax error: Expecting an element.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:880:9 Unresolved reference 'providerModel'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:880:29 Unresolved reference 'turnReceipt'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:883:21 Unresolved reference 'turnReceipt'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:884:17 Unresolved reference 'ModelMode'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:884:50 Unresolved reference 'turnReceipt'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:885:35 Unresolved reference 'turnReceipt'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:897:10 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:898:9 Unresolved reference 'routingReceipt'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:899:7 Syntax error: Expecting an element.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/MediaAttachmentsRow.kt:87:9 'val' cannot be reassigned.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/MediaAttachmentsRow.kt:87:22 Unresolved label.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/MediaAttachmentsRow.kt:102:15 Unsupported escape sequence.
+
+> Task :app:compileDebugKotlin FAILED
+> Task :app:mergeDebugNativeLibs
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 3m 9s
+27 actionable tasks: 27 executed
+abel.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/MediaAttachmentsRow.kt:102:15 Unsupported escape sequence.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:12:20 Unresolved reference 'R'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:31:16 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:31:16 Not enough information to infer type argument for 'T'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:32:5 Not enough information to infer type argument for 'K'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:33:7 Argument type mismatch: actual type is 'T? (of fun <T> T.apply)', but 'K (of fun <K> TRY_CALL)' was expected.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:33:35 Unresolved reference 'R'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:33:66 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:33:66 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> T.apply(block: T.() -> Unit): T
+    [R|Contract description]
+     <
+        CallsInPlace(block, EXACTLY_ONCE)
+    >
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:33:72 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:34:9 Unresolved reference 'isLooping'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:35:9 Unresolved reference 'setVolume'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:37:30 Null cannot be a value of a non-null type 'uninferred K (of fun <K> TRY_CALL)'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:41:25 Unresolved reference 'release'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:48:17 Unresolved reference 'setSurface'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:49:32 Unresolved reference 'start'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:53:60 Unresolved reference 'isPlaying'.
+e: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:55:22 Unresolved reference 'start'.
+
+> Task :app:compileDebugKotlin FAILED
+
+[Incubating] Problems report is available at: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/build/reports/problems/problems-report.html
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+A problem was found with the configuration of task ':app:mergeExtDexDebug' (type 'DexMergingTask').
+  - Type 'com.android.build.gradle.internal.tasks.DexMergingTask' property 'fileDependencyDexDir' specifies directory 'E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\intermediates\external_file_lib_dex_archives\debug\desugarDebugFileDependencies' which doesn't exist.
+    
+    Reason: An input file was expected to be present but it doesn't exist.
+    
+    Possible solutions:
+      1. Make sure the directory exists before the task is called.
+      2. Make sure that the task which produces the directory is declared as an input.
+    
+    For more information, please refer to https://docs.gradle.org/9.3.1/userguide/validation_problems.html#input_file_does_not_exist in the Gradle documentation.
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 3m 24s
+14 actionable tasks: 14 executed
+Configuration cache entry stored.

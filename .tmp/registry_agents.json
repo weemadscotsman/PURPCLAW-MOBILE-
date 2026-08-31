@@ -1,0 +1,445 @@
+{
+  "agents": [
+    {
+      "id": "AXOLOTL",
+      "name": "AXOLOTL",
+      "desc": "Regeneration Specialist",
+      "icon": "🦎",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "AXOLOTL",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "BEE",
+      "name": "BEE",
+      "desc": "Pollination Specialist",
+      "icon": "🐝",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "BEE",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "BUNNY",
+      "name": "BUNNY",
+      "desc": "Quick Reaction",
+      "icon": "🐰",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "BUNNY",
+      "division": "SECURITY"
+    },
+    {
+      "id": "CACTUS",
+      "name": "CACTUS",
+      "desc": "Efficiency Auditor",
+      "icon": "🌵",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "CACTUS",
+      "division": "INFRASTRUCTURE"
+    },
+    {
+      "id": "CHART",
+      "name": "CHART",
+      "desc": "Visualization Specialist",
+      "icon": "📊",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "CHART",
+      "division": "SCIENCE"
+    },
+    {
+      "id": "CHONK",
+      "name": "CHONK",
+      "desc": "Simplification Expert",
+      "icon": "🐈",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "CHONK",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "CLAW",
+      "name": "CLAW",
+      "desc": "Tooling Integrator",
+      "icon": "🦾",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "CLAW",
+      "division": "OPERATIONS"
+    },
+    {
+      "id": "CROW",
+      "name": "CROW",
+      "desc": "Gatherer",
+      "icon": "🐦",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "CROW",
+      "division": "CREATIVE"
+    },
+    {
+      "id": "DRAGON",
+      "name": "DRAGON",
+      "desc": "Chief Architect",
+      "icon": "🐉",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "DRAGON",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "DUCK",
+      "name": "DUCK",
+      "desc": "Research Accelerant",
+      "icon": "🦆",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "DUCK",
+      "division": "MEDIA_OPS"
+    },
+    {
+      "id": "ELEPHANT",
+      "name": "ELEPHANT",
+      "desc": "Memory Keeper",
+      "icon": "🐘",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "ELEPHANT",
+      "division": "OPERATIONS"
+    },
+    {
+      "id": "FOX",
+      "name": "FOX",
+      "desc": "Strategy Specialist",
+      "icon": "🦊",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "FOX",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "GHOST",
+      "name": "GHOST",
+      "desc": "Quality Guardian",
+      "icon": "👻",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "GHOST",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "GOOSE",
+      "name": "GOOSE",
+      "desc": "Chaos Catalyst",
+      "icon": "🪿",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "GOOSE",
+      "division": "MEDIA_OPS"
+    },
+    {
+      "id": "GORILLA",
+      "name": "GORILLA",
+      "desc": "Heavy Lifter",
+      "icon": "🦍",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "GORILLA",
+      "division": "OPERATIONS"
+    },
+    {
+      "id": "GUARDIAN",
+      "name": "GUARDIAN",
+      "desc": "Real-time Monitor",
+      "icon": "🛡️",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "GUARDIAN",
+      "division": "SECURITY"
+    },
+    {
+      "id": "HAWK",
+      "name": "HAWK",
+      "desc": "Aerial Recon",
+      "icon": "🦅",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "HAWK",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "INNOVATOR",
+      "name": "INNOVATOR",
+      "desc": "Emerging Tech Scout",
+      "icon": "💡",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "INNOVATOR",
+      "division": "SCIENCE"
+    },
+    {
+      "id": "JELLYFISH",
+      "name": "JELLYFISH",
+      "desc": "Ambient Observer",
+      "icon": "🪼",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "JELLYFISH",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "KAREN",
+      "name": "KAREN",
+      "desc": "Quality Control",
+      "icon": "💅",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "KAREN",
+      "division": "MANAGEMENT"
+    },
+    {
+      "id": "KRAKEN",
+      "name": "KRAKEN",
+      "desc": "Deep Data Specialist",
+      "icon": "🦑",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "KRAKEN",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "LEMUR",
+      "name": "LEMUR",
+      "desc": "Resource Manager",
+      "icon": "🦝",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "LEMUR",
+      "division": "MANAGEMENT"
+    },
+    {
+      "id": "MANTIS",
+      "name": "MANTIS",
+      "desc": "Precision Striker",
+      "icon": "🪲",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "MANTIS",
+      "division": "OPERATIONS"
+    },
+    {
+      "id": "MOTH",
+      "name": "MOTH",
+      "desc": "Pattern Detector",
+      "icon": "🦋",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "MOTH",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "MUSHROOM",
+      "name": "MUSHROOM",
+      "desc": "Organic Refactorer",
+      "icon": "🍄",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "MUSHROOM",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "NAVIGATOR",
+      "name": "NAVIGATOR",
+      "desc": "Route Planner",
+      "icon": "🧭",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "NAVIGATOR",
+      "division": "MANAGEMENT"
+    },
+    {
+      "id": "NUMBERS",
+      "name": "NUMBERS",
+      "desc": "Statistical Analyst",
+      "icon": "🔢",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "NUMBERS",
+      "division": "SCIENCE"
+    },
+    {
+      "id": "OCTOPUS",
+      "name": "OCTOPUS",
+      "desc": "Edge Case Hunter",
+      "icon": "🐙",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "OCTOPUS",
+      "division": "SECURITY"
+    },
+    {
+      "id": "OWL",
+      "name": "OWL",
+      "desc": "Security Auditor",
+      "icon": "🦉",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "OWL",
+      "division": "SECURITY"
+    },
+    {
+      "id": "PANDA",
+      "name": "PANDA",
+      "desc": "Content Specialist",
+      "icon": "🐼",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "PANDA",
+      "division": "CREATIVE"
+    },
+    {
+      "id": "PARROT",
+      "name": "PARROT",
+      "desc": "Communication Bridge",
+      "icon": "🦜",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "PARROT",
+      "division": "MEDIA_OPS"
+    },
+    {
+      "id": "PENGUIN",
+      "name": "PENGUIN",
+      "desc": "Project Coordinator",
+      "icon": "🐧",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "PENGUIN",
+      "division": "MANAGEMENT"
+    },
+    {
+      "id": "PHOENIX",
+      "name": "PHOENIX",
+      "desc": "Rebirth Specialist",
+      "icon": "🔥",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "PHOENIX",
+      "division": "CREATIVE"
+    },
+    {
+      "id": "RABBIT",
+      "name": "RABBIT",
+      "desc": "Defensive Programmer",
+      "icon": "🐰",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "RABBIT",
+      "division": "SECURITY"
+    },
+    {
+      "id": "RAVEN",
+      "name": "RAVEN",
+      "desc": "Signals Analyst",
+      "icon": "🐦‍⬛",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "RAVEN",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "ROBOT",
+      "name": "ROBOT",
+      "desc": "Precision Engineer",
+      "icon": "🤖",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "ROBOT",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "SCIENTIST",
+      "name": "SCIENTIST",
+      "desc": "Research Lead",
+      "icon": "🔬",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "SCIENTIST",
+      "division": "SCIENCE"
+    },
+    {
+      "id": "SHAMAN",
+      "name": "SHAMAN",
+      "desc": "Creativity Co-Processor",
+      "icon": "🔮",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "SHAMAN",
+      "division": "SECURITY"
+    },
+    {
+      "id": "SHARK",
+      "name": "SHARK",
+      "desc": "Hunter",
+      "icon": "🦈",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "SHARK",
+      "division": "OPERATIONS"
+    },
+    {
+      "id": "SNAKE",
+      "name": "SNAKE",
+      "desc": "Primary Access",
+      "icon": "🐍",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "SNAKE",
+      "division": "SECURITY"
+    },
+    {
+      "id": "SPIDER",
+      "name": "SPIDER",
+      "desc": "Intel Specialist",
+      "icon": "🕷️",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "SPIDER",
+      "division": "INTELLIGENCE"
+    },
+    {
+      "id": "TURTLE",
+      "name": "TURTLE",
+      "desc": "Quality Engineer",
+      "icon": "🐢",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "TURTLE",
+      "division": "ENGINEERING"
+    },
+    {
+      "id": "VOID",
+      "name": "VOID",
+      "desc": "Null Handler",
+      "icon": "🕳️",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "VOID",
+      "division": "INFRASTRUCTURE"
+    },
+    {
+      "id": "WOLF",
+      "name": "WOLF",
+      "desc": "Pack Leader",
+      "icon": "🐺",
+      "model": "minimax/MiniMax-M3",
+      "tools": null,
+      "soul": "WOLF",
+      "division": "ENGINEERING"
+    }
+  ],
+  "count": 0
+}

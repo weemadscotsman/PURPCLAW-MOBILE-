@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "reply": "<think>\nThe user wants me to reply with exactly \"pong\".\n</think>\n\npong",
+  "model": "MiniMax-M2.7",
+  "provider": "minimax",
+  "telemetry": {
+    "requestedProvider": "auto",
+    "requestedModel": "auto",
+    "provider": "minimax",
+    "model": "MiniMax-M2.7",
+    "route": "CHAT",
+    "lease": null,
+    "toolCalls": 0,
+    "agentCalls": 0,
+    "skillCalls": 0,
+    "fallbackCount": 0,
+    "fallbackPath": [],
+    "providerAttempts": [
+      {
+        "provider": "minimax",
+        "ok": true
+      }
+    ],
+    "promptTokens": null,
+    "completionTokens": null,
+    "reasoningTokens": null,
+    "totalTokens": null,
+    "reasoningState": null,
+    "ttftMs": null,
+    "durationMs": null,
+    "status": "complete"
+  },
+  "providerAttempts": [
+    {
+      "provider": "minimax",
+      "ok": true
+    }
+  ],
+  "modeOffer": null,
+  "sessionId": "surface:chat",
+  "historyTurns": 40
+}

@@ -1,0 +1,23 @@
+Calculating task graph as no cached configuration is available for tasks: clean
+> Task :app:clean FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:clean'.
+> java.io.IOException: Unable to delete directory 'E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build'
+    Failed to delete some children. This might happen because a process has files open or has its working directory set in the target directory.
+    - E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\outputs\apk\debug\app-debug.apk
+    - E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\outputs\apk\debug
+    - E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\outputs\apk
+    - E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\outputs
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 20s
+1 actionable task: 1 executed
+Configuration cache entry stored.

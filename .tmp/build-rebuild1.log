@@ -1,0 +1,60 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:parseDebugLocalResources
+> Task :app:generateDebugRFile
+> Task :app:javaPreCompileDebug
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:kspDebugKotlin
+> Task :app:checkDebugDuplicateClasses
+> Task :app:desugarDebugFileDependencies
+> Task :app:mergeExtDexDebug
+> Task :app:compileDebugKotlin
+
+Daemon is stopping immediately stop command received
+The message received from the daemon indicates that the daemon has disappeared.
+Build request sent: Build{id=0bfb5d0a-0b87-417e-842f-bd4c14aa69bd, currentDir=E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile}
+Attempting to read last messages from the daemon log...
+Daemon pid: 9956
+  log file: C:\Users\Admin\.gradle\daemon\9.3.1\daemon-9956.out.log
+----- Last 20 lines from daemon log file - daemon-9956.out.log -----
+2026-08-25T03:17:53.850+0100 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Command execution: started DaemonCommandExecution[command = Build{id=0bfb5d0a-0b87-417e-842f-bd4c14aa69bd, currentDir=E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile}, connection = DefaultDaemonConnection: socket connection from /127.0.0.1:57245 to /127.0.0.1:57246] after 0.00715 minutes of idle
+2026-08-25T03:17:53.851+0100 [INFO] [org.gradle.launcher.daemon.server.DaemonRegistryUpdater] Marking the daemon as busy, address: [571436a4-853b-4b0f-bb01-61f68a138b32 port:57245, addresses:[localhost/127.0.0.1]]
+2026-08-25T03:17:53.851+0100 [DEBUG] [org.gradle.launcher.daemon.registry.PersistentDaemonRegistry] Marking busy by address: [571436a4-853b-4b0f-bb01-61f68a138b32 port:57245, addresses:[localhost/127.0.0.1]]
+2026-08-25T03:17:53.854+0100 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Waiting to acquire exclusive lock on daemon addresses registry.
+2026-08-25T03:17:53.855+0100 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Lock acquired on daemon addresses registry.
+2026-08-25T03:17:53.859+0100 [DEBUG] [org.gradle.cache.internal.DefaultFileLockManager] Releasing lock on daemon addresses registry.
+2026-08-25T03:17:53.859+0100 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] resetting idle timer
+2026-08-25T03:17:53.860+0100 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] daemon is running. Sleeping until state changes.
+2026-08-25T03:17:53.863+0100 [INFO] [org.gradle.launcher.daemon.server.exec.StartBuildOrRespondWithBusy] Daemon is about to start building Build{id=0bfb5d0a-0b87-417e-842f-bd4c14aa69bd, currentDir=E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile}. Dispatching build started information...
+2026-08-25T03:17:53.864+0100 [DEBUG] [org.gradle.launcher.daemon.server.SynchronizedDispatchConnection] thread 37: dispatching org.gradle.launcher.daemon.protocol.BuildStarted@5c17cb
+2026-08-25T03:17:53.872+0100 [DEBUG] [org.gradle.launcher.daemon.server.exec.EstablishBuildEnvironment] Configuring env variables: [PATH, NVM_SYMLINK, HERMES_HOME, LLM_API_KEY, ALLUSERSPROFILE, XDG_CACHE_HOME, COREPACK_ENABLE_AUTO_PIN, PROGRAMFILES, DEEPSEEK_MODEL, DIRNAME, USERNAME, PWD, ProgramFiles(x86), DEFAULT_JVM_OPTS, KIMI_API_KEY, PATHEXT, DriverData, CODEX_HOME, NoDefaultCurrentDirectoryInExePath, HOMEPATH, PROCESSOR_IDENTIFIER, PIP_CACHE_DIR, TORCHINDUCTOR_CACHE_DIR, PUBLIC, OPENAI_MODEL, EXEPATH, SHLVL, OLLAMA_HOST, JAVA_HOME, PROMPT, GIT_EDITOR, TERM, asl.log, CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, MSYSTEM, APPDATA, VIPSHOME, JAVA_EXE, KILO_CPU_BASELINE, ChocolateyInstall, ChocolateyToolsLocation, _, NPM_CONFIG_CACHE, COMPUTERNAME, APP_BASE_NAME, OPENCLAUDE_HEAP_RELAUNCHED, HOMEDRIVE, OPENAI_BASE_URL, NUMBER_OF_PROCESSORS, USERDOMAIN_ROAMINGPROFILE, PROCESSOR_LEVEL, SYSTEMDRIVE, HERMES_GIT_BASH_PATH, CLAUDE_CODE_USE_OPENAI, PROCESSOR_ARCHITECTURE, PSModulePath, =E:, CLAUDE_CODE_ENTRYPOINT, CLAUDECODE, BUN_FEATURE_FLAGS, APP_HOME, ELEVENLABS_API_KEY, SHELL, DEEPSEEK_USE_LOCAL, OLDPWD, FTSDK_DIR, TMPDIR, WINDIR, ProgramData, ProgramW6432, PYENV, POWERSHELL_DISTRIBUTION_CHANNEL, LOCALAPPDATA, ChocolateyLastPathUpdate, USERDOMAIN, LOGONSERVER, KINECTSDK10_DIR, NODE_OPTIONS, PLINK_PROTOCOL, SYSTEMROOT, VBOX_MSI_INSTALL_PATH, TESSDATA_PREFIX, CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED_ID, OS, KINECT_TOOLKIT_DIR, CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED, COMMONPROGRAMFILES, COMSPEC, NVM_HOME, PROCESSOR_REVISION, CommonProgramW6432, TEMP, DEEPSEEK_API_KEY, USERPROFILE, TMP, POWERSHELL_TELEMETRY_OPTOUT, CommonProgramFiles(x86), OPENAI_API_KEY, HOME]
+2026-08-25T03:17:53.886+0100 [DEBUG] [org.gradle.launcher.daemon.server.exec.LogToClient] About to start relaying all logs to the client via the connection.
+2026-08-25T03:17:53.887+0100 [INFO] [org.gradle.launcher.daemon.server.exec.LogToClient] The client will now receive all logging from the daemon (pid: 9956). The daemon log file: C:\Users\Admin\.gradle\daemon\9.3.1\daemon-9956.out.log
+2026-08-25T03:17:53.890+0100 [DEBUG] [org.gradle.launcher.daemon.server.exec.RequestStopIfSingleUsedDaemon] Requesting daemon stop after processing Build{id=0bfb5d0a-0b87-417e-842f-bd4c14aa69bd, currentDir=E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile}
+2026-08-25T03:17:53.891+0100 [LIFECYCLE] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Daemon will be stopped at the end of the build 
+2026-08-25T03:17:53.891+0100 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] Stop as soon as idle requested. The daemon is busy
+2026-08-25T03:17:53.891+0100 [DEBUG] [org.gradle.launcher.daemon.server.DaemonStateCoordinator] daemon stop has been requested. Sleeping until state changes.
+2026-08-25T03:17:53.904+0100 [DEBUG] [org.gradle.launcher.daemon.server.exec.ExecuteBuild] The daemon has started executing the build.
+2026-08-25T03:17:53.905+0100 [DEBUG] [org.gradle.launcher.daemon.server.exec.ExecuteBuild] Executing build with daemon context: DefaultDaemonContext[uid=504d5b67-c331-4829-a445-109bb1395220,javaHome=C:\Program Files\Microsoft\jdk-21.0.10.7-hotspot,javaVersion=21,javaVendor=Microsoft,daemonRegistryDir=C:\Users\Admin\.gradle\daemon,pid=9956,idleTimeout=120000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=-Xmx4g,-Dfile.encoding=UTF-8,-Duser.country=US,-Duser.language=en,-Duser.variant]
+Daemon is stopping immediately stop command received----- End of the daemon log -----
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Gradle build daemon disappeared unexpectedly (it may have been killed or may have crashed)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.

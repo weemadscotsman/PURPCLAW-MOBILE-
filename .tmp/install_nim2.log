@@ -1,0 +1,4 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Timed out waiting for finished message from client socket connection from /127.0.0.1:5188 to /127.0.0.1:42284. Discarding connection.
+Reusing configuration cache.

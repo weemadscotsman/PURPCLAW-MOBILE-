@@ -1,0 +1,55 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+
+Exception in thread "AWT-EventQueue-0" java.lang.NullPointerException: Cannot invoke "ksp.com.intellij.openapi.application.Application.getService(java.lang.Class)" because the return value of "ksp.com.intellij.openapi.application.ApplicationManager.getApplication()" is null
+	at ksp.com.intellij.openapi.fileEditor.FileDocumentManager.getInstance(FileDocumentManager.java:35)
+	at ksp.com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers.lambda$notifyDecompilerSetChange$1(BinaryFileTypeDecompilers.java:29)
+	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:318)
+	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:773)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:720)
+	at java.desktop/java.awt.EventQueue$4.run(EventQueue.java:714)
+	at java.base/java.security.AccessController.doPrivileged(AccessController.java:400)
+	at java.base/java.security.ProtectionDomain$JavaSecurityAccessImpl.doIntersectionPrivilege(ProtectionDomain.java:87)
+	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:742)
+	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:203)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:124)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:113)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:109)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:101)
+	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:90)
+
+> Task :app:compileDebugKotlin
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\CanvasDao_Impl.kt
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\IntakeDao_Impl.kt
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\MemoryDao_Impl.kt
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\PurpClawDatabase_Impl.kt
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\ReceiptDao_Impl.kt
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\SnapshotDao_Impl.kt
+e: Source file or directory not found: E:\god folder\02_ACTIVE_PROJECTS\PURPCLAW\purp mobile\app\build\generated\ksp\debug\kotlin\com\example\core\database\TurnDao_Impl.kt
+
+> Task :app:compileDebugKotlin FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 10m 25s
+8 actionable tasks: 2 executed, 6 up-to-date

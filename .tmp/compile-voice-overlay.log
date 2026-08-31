@@ -1,0 +1,28 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as no cached configuration is available for tasks: :app:compileDebugKotlin
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/database/PurpClawDatabase.kt:419:11 'fun fallbackToDestructiveMigration(): RoomDatabase.Builder<PurpClawDatabase>' is deprecated. Replace by overloaded version with parameter to indicate if all tables should be dropped or not.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/network/HomeRuntimeBridge.kt:233:61 Java type mismatch: inferred type is 'Nothing?', but 'String' was expected.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/core/runtime/ToolRuntimeEngine.kt:417:61 'static field VIBRATOR_SERVICE: String' is deprecated. Deprecated in Java.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/MainViewModel.kt:1228:26 This extension is shadowed by a member: 'fun toEntity(): ProofReceiptEntity' defined in 'com/example/core/model/ProofReceipt'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/DualViewBrowser.kt:80:30 'val Icons.Filled.ArrowBack: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ArrowBack.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/DualViewBrowser.kt:83:30 'val Icons.Filled.ArrowForward: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ArrowForward.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/components/PurpClawLogoAnimated.kt:53:11 Check for instance is always 'true'.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/CommandScreen.kt:436:100 'val Icons.Filled.Send: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Send.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:79:46 'val Icons.Filled.Launch: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Launch.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:83:67 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///E:/god%20folder/02_ACTIVE_PROJECTS/PURPCLAW/purp%20mobile/app/src/main/java/com/example/ui/screens/ToolsMeshScreen.kt:89:76 'val Icons.Filled.Launch: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Launch.
+
+BUILD SUCCESSFUL in 2m 32s
+8 actionable tasks: 2 executed, 6 up-to-date
+Configuration cache entry stored.

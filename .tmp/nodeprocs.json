@@ -1,0 +1,66 @@
+[
+    {
+        "ProcessId":  8136,
+        "CommandLine":  "\"node\"   \"C:\\Users\\Admin\\AppData\\Roaming\\npm\\\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\" "
+    },
+    {
+        "ProcessId":  10996,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe --max-old-space-size=8192 --expose-gc \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\""
+    },
+    {
+        "ProcessId":  21180,
+        "CommandLine":  "\"node\"   \"C:\\Users\\Admin\\AppData\\Roaming\\npm\\\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\" "
+    },
+    {
+        "ProcessId":  8168,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe --max-old-space-size=8192 --expose-gc \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\""
+    },
+    {
+        "ProcessId":  12516,
+        "CommandLine":  "\"node\"   \"C:\\Users\\Admin\\AppData\\Roaming\\npm\\\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\" "
+    },
+    {
+        "ProcessId":  3732,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe --max-old-space-size=8192 --expose-gc \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\""
+    },
+    {
+        "ProcessId":  16672,
+        "CommandLine":  "\"node\"   \"C:\\Users\\Admin\\AppData\\Roaming\\npm\\\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\" "
+    },
+    {
+        "ProcessId":  7444,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe --max-old-space-size=8192 --expose-gc \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\@gitlawb\\openclaude\\bin\\openclaude\""
+    },
+    {
+        "ProcessId":  21636,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\pm2\\lib\\Daemon.js\""
+    },
+    {
+        "ProcessId":  3848,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe -e \"\nconst { assemble } = require(\u0027./lib/installer/assemble.js\u0027);\nassemble({ profile: \u0027FULL-USB\u0027, targetRoot: \u0027E:/Temp/purp-usb-test\u0027 })\n  .then(r =\u003e console.log(JSON.stringify({release:r.release, profile:r.profile, artifacts:r.artifacts, steps:r.steps}, null, 1)))\n  .catch(e =\u003e { console.error(\u0027FAIL:\u0027, e.message); process.exit(1); })\""
+    },
+    {
+        "ProcessId":  19876,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe -e \"\nconst {assemble}=require(\u0027./lib/installer/assemble.js\u0027);\nassemble({profile:\u0027FULL-USB\u0027,targetRoot:\u0027E:/Temp/purpclaw-install-test\u0027}).then(r=\u003e{\n  console.log(\u0027PROFILE\u0027,r.profile); console.log(\u0027STEPS:\u0027); r.steps.forEach(s=\u003econsole.log(\u0027 -\u0027,s));\n  console.log(\u0027ARTIFACTS\u0027,JSON.stringify(r.artifacts,null,1));\n}).catch(e=\u003e{console.error(\u0027FAIL\u0027,e.message);process.exit(1)})\""
+    },
+    {
+        "ProcessId":  6404,
+        "CommandLine":  "node \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\pm2\\lib\\ProcessContainerFork.js\""
+    },
+    {
+        "ProcessId":  7356,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe -e \"\nconst {assemble}=require(\u0027./lib/installer/assemble.js\u0027);\nassemble({profile:\u0027FULL-USB\u0027,targetRoot:\u0027E:/Temp/purp-usb-test\u0027}).then(r=\u003e{\n  console.log(\u0027PROFILE\u0027,r.profile);\n  console.log(\u0027STEPS:\u0027); (r.steps||[]).forEach(s=\u003econsole.log(\u0027 -\u0027,s));\n  console.log(\u0027ARTIFACTS\u0027,JSON.stringify(r.artifacts,null,1));\n}).catch(e=\u003e{console.error(\u0027FAIL\u0027,e.message);process.exit(1)})\""
+    },
+    {
+        "ProcessId":  13756,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe -e \"\nconst { assemble } = require(\u0027./lib/installer/assemble.js\u0027);\nassemble({ profile: \u0027FULL-USB\u0027, targetRoot: \u0027E:/Temp/purp-usb-test\u0027 })\n  .then(r =\u003e console.log(JSON.stringify({release:r.release, profile:r.profile, artifacts:r.artifacts, steps:r.steps}, null, 1)))\n  .catch(e =\u003e { console.error(\u0027FAIL:\u0027, e.message); process.exit(1); });\""
+    },
+    {
+        "ProcessId":  19912,
+        "CommandLine":  "node \"E:\\billy desktop\\.tool-homes\\npm-roaming\\node_modules\\pm2\\lib\\ProcessContainerFork.js\""
+    },
+    {
+        "ProcessId":  16772,
+        "CommandLine":  "C:\\nvm4w\\nodejs\\node.exe -e \"\nconst { assemble } = require(\u0027./lib/installer/assemble.js\u0027);\nassemble({ profile: \u0027FULL-USB\u0027, targetRoot: \u0027E:/Temp/purp-usb-fresh\u0027 })\n  .then(r =\u003e { console.log(\u0027OK release=\u0027 + r.release + \u0027 profile=\u0027 + r.profile); console.log(r.steps.join(\u0027\\n\u0027)); })\n  .catch(e =\u003e { console.error(\u0027FAIL:\u0027, e.message); process.exit(1); });\""
+    }
+]
