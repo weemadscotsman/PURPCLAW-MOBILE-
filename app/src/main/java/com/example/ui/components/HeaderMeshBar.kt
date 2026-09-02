@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,14 +54,14 @@ import com.example.R
 import com.example.core.model.CompanionPetState
 import com.example.core.model.InteractionMode
 import com.example.core.model.MeshStatus
+import com.example.ui.design.PurpButton
+import com.example.ui.theme.Accent
 import com.example.ui.theme.AmberHybrid
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldOnline
-import com.example.ui.theme.PurpBorder
-import com.example.ui.theme.PurpDeep
-import com.example.ui.theme.PurpNeon
-import com.example.ui.theme.PurpPrimary
+import com.example.ui.theme.CyanBorder
+import com.example.ui.theme.PurpSurfaceElevated
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 
@@ -91,7 +93,7 @@ fun HeaderMeshBar(
   val meshBadgeColor by animateColorAsState(
     targetValue = when (meshStatus) {
       MeshStatus.HOME_ONLINE -> EmeraldOnline
-      MeshStatus.SOVEREIGN_LOCAL -> PurpNeon
+      MeshStatus.SOVEREIGN_LOCAL -> Accent
       MeshStatus.HYBRID_DEGRADED -> AmberHybrid
       MeshStatus.DISCOVERING -> TextMuted
     },
@@ -123,12 +125,12 @@ fun HeaderMeshBar(
             .size(30.dp)
             .clip(CircleShape)
             .background(
-              Brush.linearGradient(listOf(PurpNeon.copy(alpha = 0.55f), Color(0xFF1B1030)))
+              Brush.linearGradient(listOf(Accent.copy(alpha = 0.55f), Color(0xFF0D1F2D)))
             )
-            .border(1.dp, PurpNeon.copy(alpha = 0.6f), CircleShape)
+            .border(1.dp, Accent.copy(alpha = 0.6f), CircleShape)
         ) {
           Image(
-            painter = painterResource(id = R.drawable.purpclaw_logo),
+            painter = painterResource(id = R.drawable.purpclaw_logo_canonical),
             contentDescription = "PurpClaw",
             modifier = Modifier
               .size(28.dp)
@@ -178,12 +180,12 @@ fun HeaderMeshBar(
         modifier = Modifier.testTag("mode_pill"),
         shape = RoundedCornerShape(12.dp),
         color = when (interactionMode) {
-          InteractionMode.WORK -> PurpNeon.copy(alpha = 0.25f)
-          InteractionMode.CHAT -> PurpDeep.copy(alpha = 0.7f)
+          InteractionMode.WORK -> Accent.copy(alpha = 0.25f)
+          InteractionMode.CHAT -> PurpSurfaceElevated.copy(alpha = 0.7f)
         },
         border = androidx.compose.foundation.BorderStroke(
           1.dp,
-          if (interactionMode == InteractionMode.WORK) PurpNeon else PurpBorder
+          if (interactionMode == InteractionMode.WORK) Accent else CyanBorder
         )
       ) {
         Text(
@@ -244,7 +246,15 @@ private fun MeshSheetBody(
       Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp),
       horizontalArrangement = Arrangement.SpaceBetween
     ) {
-      Text(label, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = TextMuted)
+      // WEIGHT LAW: the label side yields; the value side takes what it needs.
+      // Without a weighted sibling a long label squeezed the value column.
+      Text(
+        label,
+        fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = TextMuted,
+        maxLines = 1,
+        modifier = Modifier.weight(1f, fill = false)
+      )
+      Spacer(Modifier.size(10.dp))
       Text(value, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = valueColor, maxLines = 1)
     }
   }
@@ -283,21 +293,25 @@ private fun MeshSheetBody(
   }
 
   Spacer(Modifier.size(12.dp))
+  // VERTICAL-TEXT FIX (#54): three buttons in a bare Row squeezed each label
+  // to one letter per line on phone width. Canonical PurpButton + horizontal
+  // scroll keeps every label on one line instead of crushing the buttons.
   Row(
-    Modifier.padding(horizontal = 20.dp),
+    Modifier
+      .fillMaxWidth()
+      .horizontalScroll(rememberScrollState())
+      .padding(horizontal = 20.dp),
     horizontalArrangement = Arrangement.spacedBy(8.dp)
   ) {
-    androidx.compose.material3.OutlinedButton(onClick = onReconcile) {
-      Text("Probe now", fontSize = 12.sp)
-    }
-    androidx.compose.material3.OutlinedButton(
+    PurpButton(text = "Probe now", onClick = onReconcile)
+    PurpButton(
+      text = "Force failover drill",
       onClick = { onToggleMeshStatus(if (meshStatus == MeshStatus.HOME_ONLINE) MeshStatus.SOVEREIGN_LOCAL else MeshStatus.HOME_ONLINE) }
-    ) {
-      Text("Force failover drill", fontSize = 12.sp)
-    }
-    androidx.compose.material3.OutlinedButton(onClick = onToggleFullSystem) {
-      Text(if (fullSystemScope) "Scope: Full" else "Scope: Scoped", fontSize = 12.sp)
-    }
+    )
+    PurpButton(
+      text = if (fullSystemScope) "Scope: Full" else "Scope: Scoped",
+      onClick = onToggleFullSystem
+    )
   }
 
   Spacer(Modifier.size(8.dp))
@@ -317,8 +331,8 @@ private fun MeshSheetBody(
     Avatar3DClips.COMPANION_NAMES.forEach { name ->
       Surface(
         shape = RoundedCornerShape(10.dp),
-        color = if (selectedCompanion == name) PurpDeep else com.example.ui.theme.PurpSurfaceElevated,
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedCompanion == name) PurpNeon else PurpBorder),
+        color = if (selectedCompanion == name) PurpSurfaceElevated else com.example.ui.theme.PurpSurfaceElevated,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedCompanion == name) Accent else CyanBorder),
         modifier = Modifier.clickable { onSelectCompanion(name) }
       ) {
         Row(

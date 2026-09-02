@@ -326,6 +326,10 @@ object SharedQuotaLedger {
             // Model's context window smaller than the prompt (observed on Groq ~10k).
             "maximum context length" in value || "context_length_exceeded" in value ||
                 "context window" in value -> FailureClass.CONTEXT_TOO_SMALL
+            // 413 with a rate-limit/TPM budget reason stays RATE_LIMITED (Groq 413
+            // on tokens-per-minute); a bare 413 is an oversized prompt.
+            "413" in value && ("tokens per minute" in value || "rate limit" in value || "rate_limit" in value) ->
+                FailureClass.RATE_LIMITED
             "413" in value || "prompt too large" in value ||
                 ("too large" in value && "token" in value) -> FailureClass.PROMPT_TOO_LARGE
             "usage limit" in value || "quota exhausted" in value ||

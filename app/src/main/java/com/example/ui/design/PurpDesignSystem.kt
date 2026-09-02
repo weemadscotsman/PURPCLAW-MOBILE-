@@ -2,6 +2,8 @@ package com.example.ui.design
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -30,10 +34,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AmberHybrid
+import com.example.ui.theme.CyanBorder
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldOnline
-import com.example.ui.theme.PurpBorder
-import com.example.ui.theme.PurpNeon
 import com.example.ui.theme.PurpSurfaceCard
 import com.example.ui.theme.PurpVoid
 import com.example.ui.theme.RoseOffline
@@ -76,7 +79,7 @@ enum class PurpUiStatus { READY, BUSY, DEGRADED, OFFLINE, BLOCKED, UNAVAILABLE, 
 
 private fun PurpUiStatus.color(): Color = when (this) {
   PurpUiStatus.READY, PurpUiStatus.COMPLETED -> EmeraldOnline
-  PurpUiStatus.BUSY, PurpUiStatus.RECOVERING -> PurpNeon
+  PurpUiStatus.BUSY, PurpUiStatus.RECOVERING -> CyanNeon
   PurpUiStatus.DEGRADED -> AmberHybrid
   PurpUiStatus.OFFLINE, PurpUiStatus.UNAVAILABLE -> TextMuted
   PurpUiStatus.BLOCKED, PurpUiStatus.ERROR -> RoseOffline
@@ -121,7 +124,7 @@ fun PurpHeader(
 @Composable
 fun PurpCard(
   modifier: Modifier = Modifier,
-  borderColor: Color = PurpBorder.copy(alpha = 0.7f),
+  borderColor: Color = CyanBorder.copy(alpha = 0.3f),
   containerColor: Color = PurpSurfaceCard,
   contentPadding: Dp = PurpSpacing.md,
   onClick: (() -> Unit)? = null,
@@ -140,7 +143,7 @@ fun PurpCard(
 }
 
 @Composable
-fun PurpSectionHeader(text: String, color: Color = PurpNeon, modifier: Modifier = Modifier) {
+fun PurpSectionHeader(text: String, color: Color = CyanNeon, modifier: Modifier = Modifier) {
   Text(text, style = PurpType.sectionTitle, color = color, modifier = modifier.padding(top = PurpSpacing.xs))
 }
 
@@ -171,10 +174,55 @@ fun PurpEmptyState(
       verticalArrangement = Arrangement.spacedBy(PurpSpacing.sm)
     ) {
       Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = null, tint = PurpNeon, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(22.dp))
       }
       Text(title, style = PurpType.cardTitle, color = TextPrimary)
       Text(message, style = PurpType.bodyMuted, color = TextSecondary)
     }
+  }
+}
+
+/**
+ * THE canonical button — one height (36dp), one shape, hollow neutral.
+ * No fills, no purple, no per-screen button variants.
+ *
+ * LAYOUT LAW: a label never wraps. Inside a Row with sibling text, the TEXT
+ * side must carry Modifier.weight(1f) and long button groups scroll
+ * horizontally — never squeeze buttons to one letter per line.
+ */
+@Composable
+fun PurpButton(
+  text: String,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+  enabled: Boolean = true,
+  danger: Boolean = false
+) {
+  val borderColor = when {
+    !enabled -> TextMuted.copy(alpha = 0.3f)
+    danger -> RoseOffline.copy(alpha = 0.7f)
+    else -> CyanBorder
+  }
+  val contentColor = when {
+    !enabled -> TextMuted
+    danger -> RoseOffline
+    else -> TextPrimary
+  }
+  Box(
+    modifier = modifier
+      .height(36.dp)
+      .clip(PurpShapes.small)
+      .border(1.dp, borderColor, PurpShapes.small)
+      .clickable(enabled = enabled, onClick = onClick)
+      .padding(horizontal = PurpSpacing.md),
+    contentAlignment = Alignment.Center
+  ) {
+    Text(
+      text,
+      style = PurpType.button,
+      color = contentColor,
+      maxLines = 1,
+      softWrap = false
+    )
   }
 }

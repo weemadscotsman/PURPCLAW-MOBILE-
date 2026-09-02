@@ -84,6 +84,32 @@ Session: P0 failure-driven fixes — pin truth, status-box law, browser ownershi
   dead code; context compression absent; boot overlay timer-driven; no
   on-device inference engine.
 
+### Addendum (2026-09-02 ~13:05) — second build cffbde6e
+- Reconciled the parallel lane's session recap against the tree: its #52
+  HomeRuntimeBridge HOME_LINK_DISABLED gate, #53 battery nag-once, and #47
+  Cloudflare v4 `/accounts/{id}/ai/models/search` fix were already on disk and
+  shipped inside the eff9ac25 build (verified by file mtimes + clean boot log;
+  Cloudflare catalogue live-refreshed 65 models). No merge conflicts.
+- `SharedQuotaLedger.kt` — ordering regression fix: a 413 carrying a
+  tokens-per-minute/rate-limit reason classifies RATE_LIMITED (Groq TPM);
+  only a bare 413 is PROMPT_TOO_LARGE.
+- `PurpDesignSystem.kt` — finished the de-purple WIP and added the canonical
+  **PurpButton** (36dp, hollow neutral, one shape, single-line label, danger
+  variant) with the layout law in its KDoc (text siblings take weight(1f);
+  long button groups scroll horizontally).
+- `HeaderMeshBar.kt` — vertical-text bug fixed at its diagnosed site: the three
+  OutlinedButtons in the mesh sheet (Probe now / Force failover drill / Scope)
+  now use PurpButton in a horizontally scrolling row; label/value rows give the
+  label weight so values are never crushed.
+- Build 2: `BUILD SUCCESSFUL in 4m 6s`, installed on RZCY9172MDP, cold launch
+  0 FATAL / 0 ANR, pin restore `auto/AUTO`, StartupSelfCheck passed. arm64
+  SHA-256 starts `cffbde6e`.
+- Still open from the parallel recap: app-wide PurpButton adoption (component
+  exists; other screens still use material buttons), DispatchReceipt
+  persist-fail-on-cancel, NIM stale-UUID catalogue guard, GROQ
+  tool_calling filter, googleai/ vs google-ai/ prefix mismatch, staged
+  onboarding, and all device-gated P0s listed above.
+
 ## 2026-09-01 ACTIVE CHECKPOINT — KEYBOARD, CHAT, ROUTER RECOVERY, AVATAR
 
 - Exact live root cause for the broken Samsung keyboard was not target-SDK folklore:
