@@ -19,14 +19,20 @@ import com.example.core.database.DispatchLedgerEntity
 import com.example.core.model.DecisionSource
 import com.example.core.model.DispatchReceipt
 import com.example.core.model.ExecutionLease
+import com.example.core.model.PreviewCardEvent
 import com.example.core.model.ModelMode
 import com.example.core.model.ProofReceipt
 import com.example.core.model.ToolAffinity
 import com.example.core.model.ToolCallRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -43,16 +49,35 @@ data class ToolSpec(
 
 data class ToolExecutionResult(
   val record: ToolCallRecord,
-  val proofReceipt: ProofReceipt?
+  val proofReceipt: ProofReceipt?,
+  val auditOutcome: String = "NOT_ATTEMPTED",
+  val overallTruth: String = if (record.isSuccess) "SUCCESS_UNVERIFIED" else "FAILED"
 )
 
 class ToolRuntimeEngine(
   private val context: Context,
   private val signer: KeystoreReceiptSigner,
   private val ttsEngine: TextToSpeechEngine? = null,
-  private val cameraEngine: CameraVisionEngine? = null
+  private val cameraEngine: CameraVisionEngine? = null,
+  // ARTIFACT-001: optional ReceiptDao — null in tests, injected in production via MainViewModel
+  private val receiptDao: com.example.core.database.ReceiptDao? = null,
+  // ARTIFACT-001: optional CanvasDao for event emission — null in tests
+  private val canvasDao: com.example.core.database.CanvasDao? = null
 ) {
   val deviceControl = DeviceControlEngine(context)
+
+  /** Lesson tool engine — initialized lazily so tests can replace with a stub. */
+  private val lessonToolEngine by lazy {
+    com.example.core.runtime.lesson.InMemoryLessonToolEngine()
+  }
+
+  /**
+   * Lesson card interactions bypass the JSON tool dispatch — the chat card
+   * calls this directly. The engine remains the sole owner of lesson truth.
+   */
+  suspend fun runLessonAction(
+    action: com.example.core.runtime.lesson.LessonAction
+  ): com.example.core.runtime.lesson.LessonActionResult = lessonToolEngine.act(action)
 
   companion object {
     private const val TAG = "ToolRuntimeEngine"
@@ -72,6 +97,84 @@ class ToolRuntimeEngine(
         else -> "STALE"
       }
     }
+  }
+
+  /**
+   * ARTIFACT-001 §Rule 1: mint a ProofReceipt after a tool produces an artifact.
+   * Runs synchronously on the calling thread — do not call from MainThread.
+   * The receipt is written to DB; verification upgrade happens asynchronously via ActionVerifier.
+   */
+  private fun mintArtifactReceipt(
+    toolName: String,
+    inputHash: String,
+    outputHash: String,
+    evidenceHash: String
+  ) {
+    val dao = receiptDao ?: return
+    val now = System.currentTimeMillis()
+    val receipt = ProofReceipt(
+      receiptId = "rcpt_${UUID.randomUUID()}",
+      receiptType = "TOOL_EXECUTION",
+      subsystemId = "subsystem.android.toolruntime",
+      testId = "SLICE_ACCEPTANCE",
+      deviceId = Build.FINGERPRINT,
+      nodeId = "phone-android-node-01",
+      sessionId = "ses_canonical_01",
+      startedAt = now,
+      completedAt = now,
+      result = "PASS",
+      inputHash = inputHash,
+      outputHash = outputHash,
+      evidenceHash = evidenceHash,
+      signingKeyId = KeystoreReceiptSigner.DEFAULT_KEY_ALIAS,
+      signatureAlgorithm = "SHA256withECDSA",
+      signature = "",          // ARTIFACT-001: signer signs at rest; empty here is valid for unsigned receipts
+      nonce = "nonce_${System.nanoTime()}",
+      verificationStatus = "UNVERIFIED",
+      actor = "PurpClaw Phone",
+      agent = "System",
+      toolName = toolName,
+      modelUsed = "Hardware Keystore",
+      evidenceSummary = "Artifact receipt for $toolName",
+      proofHash = evidenceHash,
+      timestamp = now,
+      executionLeaseId = ""
+    )
+    try {
+      kotlinx.coroutines.runBlocking {
+        dao.insertReceipt(receipt.toEntity())
+        // ARTIFACT-001 §Rule 1: emit CanvasEvent after receipt is persisted
+        canvasDao?.insertEvent(
+          com.example.core.database.CanvasEventEntity(
+            eventId = "evt_${UUID.randomUUID()}",
+            canvasId = "canvas_main",
+            nodeId = null,
+            actor = "PurpClaw Phone",
+            sourceNode = "phone-android-node-01",
+            sessionId = "ses_canonical_01",
+            parentEventId = null,
+            timestamp = now,
+            logicalClock = now,
+            operation = "ARTIFACT_ADDED",
+            payloadSummary = "Artifact $toolName receipt minted",
+            payloadHash = evidenceHash
+          )
+        )
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to mint artifact receipt for $toolName: ${e.message}", e)
+    }
+  }
+
+  /** Compute SHA-256 hex of a string. */
+  private fun sha256Of(s: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    return digest.digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+  }
+
+  /** Compute SHA-256 hex of a byte array. */
+  private fun sha256OfBytes(bytes: ByteArray): String {
+    return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
   }
 
   init {
@@ -212,15 +315,18 @@ class ToolRuntimeEngine(
       ),
       ToolSpec(
         name = "android.browser.open",
-        displayName = "Native Browser Open",
-        description = "Opens a URL or web search in the default or explicitly requested installed browser. Args JSON: {target,browser?}",
+        displayName = "External Browser Open",
+        // BROWSER OWNERSHIP LAW: this is the EXTERNAL device browser (Chrome etc).
+        // PurpClaw's own browser is android.browser.embed — the default for viewing
+        // built artifacts and any "open in your browser" request.
+        description = "Opens a URL/web search in an EXTERNAL device browser (Chrome etc). Use ONLY when the operator names an external browser or asks to leave the app; otherwise use android.browser.embed. Args JSON: {target,browser?,embed?} — embed:true redirects to the embedded browser",
         affinity = ToolAffinity.ANDROID_NATIVE,
         isEnabled = true
       ),
       ToolSpec(
         name = "android.browser.embed",
         displayName = "Embedded Browser",
-        description = "Opens an explicit URL in PurpClaw Dual View. Args JSON: {url}",
+        description = "Opens a URL in PurpClaw's OWN embedded browser (Dual View) and waits for the real page-load result. DEFAULT for viewing generated artifacts and any request to open a page in PurpClaw's own browser. Args JSON: {url}",
         affinity = ToolAffinity.ANDROID_NATIVE,
         isEnabled = true
       ),
@@ -364,6 +470,20 @@ class ToolRuntimeEngine(
         isEnabled = true
       ),
       ToolSpec(
+        name = "system.router.status",
+        displayName = "Router Registry Status",
+        description = "Returns canonical derived route-registry state independently of last routing decision",
+        affinity = ToolAffinity.ANDROID_NATIVE,
+        isEnabled = true
+      ),
+      ToolSpec(
+        name = "system.router.routes.list",
+        displayName = "Router Registry Routes",
+        description = "Lists derived provider, Android tool/capability, and offline Home routes with provenance",
+        affinity = ToolAffinity.ANDROID_NATIVE,
+        isEnabled = true
+      ),
+      ToolSpec(
         name = "system.router.last_decision",
         displayName = "Router Last Decision",
         description = "Returns the most recent RoutingReceipt — selection reason, latency, spend mode",
@@ -421,6 +541,10 @@ class ToolRuntimeEngine(
   @Volatile
   var routingTraceResolver: ((String) -> List<Any>)? = null
 
+  /** Read-only route-registry projection built from canonical live sources. */
+  @Volatile
+  var routeRegistrySnapshotResolver: (() -> CanonicalRouteRegistrySnapshot?)? = null
+
   /** STEP 12 (2026-08-27): real dispatch ledger reader (Room DAO-backed). */
   @Volatile
   var dispatchLedgerReader: (() -> List<DispatchLedgerEntity>)? = null
@@ -459,6 +583,33 @@ class ToolRuntimeEngine(
   private val eventRingBuffer: ArrayDeque<MutableMap<String, Any>> = ArrayDeque()
   private val eventBufferLock = Any()
 
+  /**
+   * Typed event spine for the Live Build Preview Card.
+   * MainViewModel collects this and renders it via LiveBuildPreviewCard.
+   * Also mirrored to the ring buffer for tool-accessible query via system.events.
+   */
+  private val _previewCardEvents = MutableSharedFlow<PreviewCardEvent>(
+    extraBufferCapacity = 64,
+    replay = 0,
+    onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+  )
+  val previewCardEvents: SharedFlow<PreviewCardEvent> = _previewCardEvents
+
+  /**
+   * Emit a typed preview card event. Also mirrors to the generic ring buffer
+   * so system.events.query remains consistent.
+   */
+  fun emitWorkEvent(event: PreviewCardEvent) {
+    _previewCardEvents.tryEmit(event)
+    // Mirror to ring buffer for backward compat with system.events.query tool
+    recordEvent(mutableMapOf<String, Any>().apply {
+      put("kind", "preview_card.${event::class.simpleName}")
+      put("workSessionId", event.workSessionId)
+      put("sessionId", event.sessionId)
+      put("ts", event.timestampMs)
+    })
+  }
+
   fun recordEvent(event: MutableMap<String, Any>) {
     synchronized(eventBufferLock) {
       eventRingBuffer.addLast(event)
@@ -473,6 +624,74 @@ class ToolRuntimeEngine(
         (kind == null || ev["kind"] == kind) &&
         (sessionId == null || ev["sessionId"] == sessionId)
       }.toList()
+    }
+  }
+
+  /** Persist provenance for a published derived route-registry snapshot. */
+  suspend fun persistRouteRegistryReceipt(snapshot: CanonicalRouteRegistrySnapshot): Boolean {
+    val now = System.currentTimeMillis()
+    val receiptDraft = ProofReceipt(
+      receiptId = "rcpt_route_registry_${UUID.randomUUID()}",
+      receiptType = "ROUTE_REGISTRY_SNAPSHOT",
+      subsystemId = "subsystem.android.providerrouter",
+      testId = "ROUTE_REGISTRY_REFRESH",
+      deviceId = Build.FINGERPRINT,
+      nodeId = "phone-android-node-01",
+      sessionId = "ses_canonical_01",
+      startedAt = snapshot.refreshedAt,
+      completedAt = now,
+      result = if (snapshot.state == RouterRegistryState.ROUTER_ERROR) "FAIL" else "PASS",
+      inputHash = computeSha256(snapshot.refreshReason),
+      outputHash = snapshot.hash,
+      evidenceHash = computeSha256(snapshot.toJson(includeRoutes = true).toString()),
+      nonce = "nonce_route_registry_$now",
+      verificationStatus = "VERIFIED",
+      actor = "ProviderRouter",
+      agent = "PurpClawCore",
+      toolName = "system.router.registry.refresh",
+      modelUsed = "derived-live-registry/no-llm",
+      evidenceSummary = "state=${snapshot.state.name}; routes=${snapshot.routes.size}; reason=${snapshot.refreshReason}",
+      proofHash = snapshot.hash,
+      timestamp = now
+    )
+    val signature = signer.signPayload(receiptDraft.computeCanonicalPayload())
+    val receipt = receiptDraft.copy(signingKeyId = signature.signingKeyId, signature = signature.signature)
+    return try {
+      receiptDao?.insertReceipt(receipt.toEntity())
+      canvasDao?.insertEvent(
+        com.example.core.database.CanvasEventEntity(
+          eventId = "evt_route_registry_${UUID.randomUUID()}",
+          canvasId = "canvas_main",
+          nodeId = null,
+          actor = "ProviderRouter",
+          sourceNode = "phone-android-node-01",
+          sessionId = "ses_canonical_01",
+          parentEventId = null,
+          timestamp = now,
+          logicalClock = now,
+          operation = "route.registry.refreshed",
+          payloadSummary = "${snapshot.state.name} routes=${snapshot.routes.size} hash=${snapshot.hash.take(16)}",
+          payloadHash = snapshot.hash
+        )
+      )
+      recordEvent(mutableMapOf<String, Any>(
+        "kind" to "route.registry.refreshed",
+        "routeCount" to snapshot.routes.size,
+        "registryState" to snapshot.state.name,
+        "registryHash" to snapshot.hash,
+        "sessionId" to "ses_canonical_01",
+        "ts" to now
+      ))
+      receiptDao != null && canvasDao != null
+    } catch (e: Exception) {
+      Log.e(TAG, "Route-registry receipt persistence failed", e)
+      recordEvent(mutableMapOf<String, Any>(
+        "kind" to "route.registry.audit_write_failed",
+        "registryHash" to snapshot.hash,
+        "sessionId" to "ses_canonical_01",
+        "ts" to now
+      ))
+      false
     }
   }
 
@@ -500,15 +719,44 @@ class ToolRuntimeEngine(
   /** Last android.browser.embed request — observed by UI to mount Dual View. */
   val browserEmbedRequest = MutableStateFlow<String?>(null)
 
+  /**
+   * P0-7: Real WebView load result — consumed by the suspend mechanism in
+   * android.browser.embed so the tool result reflects actual page load truth.
+   * BrowserEmbedResult(null) is the cancellation sentinel if no result arrives.
+   */
+  data class BrowserEmbedResult(
+    val ok: Boolean,
+    val url: String,
+    val title: String,
+    val error: String? = null
+  )
+  private val _browserEmbedResult = MutableSharedFlow<BrowserEmbedResult>(extraBufferCapacity = 1)
+  /** SharedFlow publisher — consumed by the suspend handler in android.browser.embed.
+   *  MutableSharedFlow is already a SharedFlow so direct assignment is safe (covariant out). */
+  val browserEmbedResult: SharedFlow<BrowserEmbedResult> = _browserEmbedResult
+
+  /**
+   * Called by MainViewModel when DualViewBrowser's WebViewClient fires
+   * onPageFinished (ok) or onReceivedError (fail). This unblocks the
+   * waiting android.browser.embed handler.
+   */
+  fun publishBrowserEmbedResult(result: BrowserEmbedResult) {
+    _browserEmbedResult.tryEmit(result)
+  }
+
   suspend fun executeTool(
     toolName: String,
     arguments: String,
     actorAgent: String = "PurpClawCore",
     lease: ExecutionLease? = null,
-    isHomeOnline: Boolean = true
+    isHomeOnline: Boolean = true,
+    requestedCallId: String? = null
   ): ToolExecutionResult = withContext(Dispatchers.IO) {
     val startTime = System.currentTimeMillis()
-    val callId = "call_${UUID.randomUUID().toString().take(8)}"
+    val callId = requestedCallId?.takeIf { it.isNotBlank() }
+      ?: "call_${UUID.randomUUID().toString().take(8)}"
+    recordToolLifecycleEvent("tool.requested", callId, toolName, actorAgent, "REQUESTED", arguments)
+    recordToolLifecycleEvent("tool.started", callId, toolName, actorAgent, "STARTED", arguments)
 
     // EXECUTION POLICY LAW: one gate decides CHAT vs WORK authority. Lease is
     // recorded for provenance only, never enforced.
@@ -529,7 +777,9 @@ class ToolRuntimeEngine(
         durationMs = 0,
         evidenceHash = computeSha256(denialJson).take(16)
       )
-      return@withContext ToolExecutionResult(record = denialRecord, proofReceipt = null)
+      return@withContext finalizeTerminalToolResult(
+        ToolExecutionResult(record = denialRecord, proofReceipt = null), actorAgent, lease
+      )
     }
 
     // ARGUMENT VALIDATION LAW (paste_23): empty {} or missing required fields
@@ -553,11 +803,13 @@ class ToolRuntimeEngine(
         durationMs = 0,
         evidenceHash = computeSha256(errJson).take(16)
       )
-      return@withContext ToolExecutionResult(record = errRecord, proofReceipt = null)
+      return@withContext finalizeTerminalToolResult(
+        ToolExecutionResult(record = errRecord, proofReceipt = null), actorAgent, lease
+      )
     }
 
     var affinity = ToolAffinity.ANDROID_NATIVE
-    var isSuccess = true
+    var isSuccess = false  // TRUTH LAW: fail-closed by default; every handler must set true on success
     var output = ""
 
     try {
@@ -575,6 +827,7 @@ class ToolRuntimeEngine(
             put("board", Build.BOARD)
           }
           output = info.toString(2)
+          isSuccess = true
         }
 
         "android.battery.status" -> {
@@ -589,6 +842,7 @@ class ToolRuntimeEngine(
             put("is_charging", batteryManager?.isCharging == true)
           }
           output = status.toString(2)
+          isSuccess = true
         }
 
         "android.storage.status" -> {
@@ -608,6 +862,7 @@ class ToolRuntimeEngine(
             put("block_size_bytes", blockSize)
           }
           output = storageInfo.toString(2)
+          isSuccess = true
         }
 
         "android.network.status" -> {
@@ -628,6 +883,7 @@ class ToolRuntimeEngine(
             put("uplink_kbps", upKbps)
           }
           output = netInfo.toString(2)
+          isSuccess = true
         }
 
         "android.clipboard.write" -> {
@@ -638,6 +894,7 @@ class ToolRuntimeEngine(
             clipboard?.setPrimaryClip(clip)
           }
           output = "Successfully wrote ${text.length} characters to Android System Clipboard."
+          isSuccess = true
         }
 
         "android.clipboard.read" -> {
@@ -651,6 +908,7 @@ class ToolRuntimeEngine(
           } else {
             "Clipboard is empty."
           }
+          isSuccess = true
         }
 
         "android.file.write" -> {
@@ -665,13 +923,26 @@ class ToolRuntimeEngine(
           } else {
             targetFile.parentFile?.mkdirs()
             targetFile.writeText(content)
+            ActionVerifier.noteFileWrite(filename)
+            // ARTIFACT-001 §Rule 1: compute checksums and mint receipt
+            val inputHash = sha256Of(arguments)
+            val outputBytes = targetFile.readBytes()
+            val outputHash = sha256OfBytes(outputBytes)
+            mintArtifactReceipt(
+              toolName = "android.file.write",
+              inputHash = inputHash,
+              outputHash = outputHash,
+              evidenceHash = outputHash
+            )
             output = JSONObject().apply {
               put("written", true)
               put("filename", filename)
               put("bytes", targetFile.length())
               put("resourceUri", "purpclaw://workspace/$filename")
               put("exists", targetFile.isFile)
+              put("sha256", outputHash)
             }.toString(2)
+            isSuccess = true
           }
         }
 
@@ -681,6 +952,7 @@ class ToolRuntimeEngine(
           val targetFile = resolveWorkspaceFile(workspace, filename)
           if (targetFile != null && targetFile.exists() && targetFile.isFile) {
             output = targetFile.readText()
+            isSuccess = true
           } else {
             isSuccess = false
             output = "WORKSPACE_FILE_NOT_FOUND: $filename"
@@ -691,8 +963,25 @@ class ToolRuntimeEngine(
           val workspace = File(context.filesDir, "workspace").apply { mkdirs() }
           val query = runCatching { JSONObject(arguments).optString("query") }.getOrDefault("")
           val files = workspace.walkTopDown().filter { it.isFile }.toList()
-          val matched = files.filter { it.name.contains(query, ignoreCase = true) || it.readText().contains(query, ignoreCase = true) }
-          output = "Found ${matched.size} files matching '$query':\n" + matched.joinToString("\n") { "- ${it.relativeTo(workspace).path} (${it.length()} bytes)" }
+          val listAll = query.isBlank() || query == "*"
+          val matched = if (listAll) files else files.filter {
+            it.name.contains(query, ignoreCase = true) ||
+              runCatching { it.readText().contains(query, ignoreCase = true) }.getOrDefault(false)
+          }
+          // P0-2: non-blank query with 0 results = FAIL; empty workspace listing = PASS
+          if (!listAll && matched.isEmpty() && query.isNotBlank()) {
+            isSuccess = false
+            output = "No files match '$query' in workspace (0 results)"
+          } else {
+            isSuccess = true
+            output = if (listAll) {
+              "PurpClaw phone-local workspace contains ${matched.size} files:\n" +
+                matched.joinToString("\n") { "- ${it.relativeTo(workspace).path} (${it.length()} bytes)" }
+            } else {
+              "Found ${matched.size} files matching '$query':\n" +
+                matched.joinToString("\n") { "- ${it.relativeTo(workspace).path} (${it.length()} bytes)" }
+            }
+          }
         }
 
         "android.artifact.preview" -> {
@@ -713,6 +1002,7 @@ class ToolRuntimeEngine(
               put("url", url)
               put("surface", "DUAL_VIEW_PANE")
             }.toString(2)
+            isSuccess = true
           }
         }
 
@@ -728,6 +1018,7 @@ class ToolRuntimeEngine(
           val notificationId = (System.currentTimeMillis() % 100000).toInt()
           notificationManager?.notify(notificationId, builder.build())
           output = "Android System Notification dispatched [ID: $notificationId]: \"$arguments\""
+          isSuccess = true
         }
 
         "android.camera.capture" -> {
@@ -745,6 +1036,15 @@ class ToolRuntimeEngine(
                 "$label ${"%.0f".format(confidence * 100)}%"
               } ?: "") + "\n" +
               "The phone-local JPEG is decoded and verified. Semantic scene understanding requires a real vision-capable model."
+
+            // ARTIFACT-001 §Rule 1: mint receipt after verified capture
+            mintArtifactReceipt(
+              toolName = "android.camera.capture",
+              inputHash = sha256Of(arguments),
+              outputHash = result.frameSha256,
+              evidenceHash = result.frameSha256
+            )
+            isSuccess = true
           } else {
             isSuccess = false
             output = "Camera capture failed verification: no non-empty decodable JPEG was produced."
@@ -799,6 +1099,7 @@ class ToolRuntimeEngine(
             }
           } catch (ignored: Exception) {}
           output = "Spoken through Android TextToSpeech engine: \"$arguments\""
+          isSuccess = true
         }
 
         "system.runtime.get", "system.capabilities.list", "system.permissions.list",
@@ -847,64 +1148,228 @@ class ToolRuntimeEngine(
             arg == "off" -> { ActionVerifier.noteTorchWrite(false); deviceControl.setTorch(false) }
             else -> deviceControl.toggleTorch().also { ActionVerifier.invertTorchMirror() }
           }
+          isSuccess = true
         }
 
         "android.app.open" -> {
           val app = runCatching { JSONObject(arguments).optString("app") }.getOrDefault(arguments)
           output = deviceControl.openApp(app)
+          // DeviceControlEngine returns a truthful diagnostic string when no
+          // launchable app matches.  Absence of an exception is not execution
+          // success: previously "No app matching ..." minted PASS receipts.
+          isSuccess = appOpenDispatchSucceeded(output)
         }
 
         "android.app.list" -> {
           output = deviceControl.listApps()
+          isSuccess = true
         }
 
         "android.browser.open" -> {
           val args = runCatching { JSONObject(arguments) }.getOrNull()
           val target = args?.optString("target").orEmpty().ifBlank { arguments }
           val browser = args?.optString("browser").orEmpty().ifBlank { null }
-          output = deviceControl.openBrowser(target, browser)
-          if (runCatching { JSONObject(output).optBoolean("ok", false) }.getOrDefault(false).not()) {
+          // WORKSPACE FILE FIX (2026-09-01): "make a website" writes HTML to the
+          // workspace then calls browser.open with a file:// URL. Redirect workspace
+          // files to the embedded WebView (browserEmbedRequest) instead of spawning
+          // an external browser. External browser is still used for http/https URLs.
+          val workspace = File(context.filesDir, "workspace")
+          val isWorkspaceFile = target.startsWith("file://") &&
+            (target.removePrefix("file://").startsWith(workspace.absolutePath) ||
+             target.removePrefix("file://").startsWith(context.filesDir.absolutePath))
+          // BROWSER OWNERSHIP LAW: an explicit embed hint (or any workspace file)
+          // routes to PurpClaw's OWN browser, never to an external one.
+          val embedHint = args?.optBoolean("embed", false) ?: false
+          if (isWorkspaceFile || embedHint) {
+            browserEmbedRequest.value = target
+            output = JSONObject().apply {
+              put("ok", true)
+              put("dispatch", "WORKSPACE_EMBED")
+              put("url", target)
+              put("surface", "DUAL_VIEW_PANE")
+            }.toString(2)
+            isSuccess = true
+          } else {
+            output = deviceControl.openBrowser(target, browser)
+            val ok = runCatching { JSONObject(output).optBoolean("ok", false) }.getOrDefault(false)
+            if (ok) isSuccess = true else isSuccess = false
+          }
+        }
+
+        // ── LESSON TOOL — lesson.start ──────────────────────────────────────
+        "lesson.start" -> {
+          val args = runCatching { JSONObject(arguments) }.getOrNull()
+          val lessonId = args?.optString("lessonId").orEmpty().ifBlank {
+            Log.w(TAG, "lesson.start called with blank lessonId")
+            "default"
+          }
+          val workSessionId = args?.optString("workSessionId")?.takeIf { it.isNotBlank() && it != "null" }
+          val payload = lessonToolEngine.startLesson(lessonId, workSessionId)
+          output = JSONObject().apply {
+            put("ok", true)
+            put("lessonCard", JSONObject().apply {
+              put("lessonId", payload.lessonId)
+              put("workSessionId", payload.workSessionId ?: "")
+              put("title", payload.title)
+              put("status", payload.status.name)
+              put("progress", JSONObject().apply {
+                put("current", payload.progress.current)
+                put("total", payload.progress.total)
+              })
+              put("step", JSONObject().apply {
+                put("stepId", payload.step.stepId)
+                put("kind", payload.step.kind.name)
+                put("prompt", payload.step.prompt)
+                payload.step.body?.let { put("body", it) }
+                if (payload.step.choices.isNotEmpty()) {
+                  put("choices", JSONArray(payload.step.choices.map { c ->
+                    JSONObject().apply { put("id", c.id); put("label", c.label) }
+                  }))
+                }
+                payload.step.hint?.let { put("hint", it) }
+                payload.step.feedback?.let { put("feedback", it) }
+                put("canSkip", payload.step.canSkip)
+              })
+              put("actions", JSONArray(payload.actions.map { it.name }))
+            })
+          }.toString(2)
+          isSuccess = true
+          Log.i(TAG, "lesson.start $lessonId → ${payload.status.name} step=${payload.step.stepId}")
+        }
+
+        // ── LESSON TOOL — lesson.action ─────────────────────────────────────
+        "lesson.action" -> {
+          val args = runCatching { JSONObject(arguments) }.getOrNull()
+          val lessonId = args?.optString("lessonId").orEmpty()
+          val stepId = args?.optString("stepId").orEmpty()
+          val workSessionId = args?.optString("workSessionId")?.takeIf { it.isNotBlank() && it != "null" }
+          val typeStr = args?.optString("type").orEmpty()
+          val answer = args?.optString("answer")?.takeIf { it.isNotBlank() && it != "null" }
+
+          val actionType: com.example.core.runtime.lesson.LessonActionType? = try {
+            com.example.core.runtime.lesson.LessonActionType.valueOf(typeStr)
+          } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "lesson.action unknown type: $typeStr")
+            output = JSONObject().apply {
+              put("ok", false)
+              put("error", "UNKNOWN_ACTION_TYPE")
+              put("received", typeStr)
+            }.toString(2)
             isSuccess = false
+            null
+          }
+
+          if (isSuccess && actionType != null) {
+            val action = com.example.core.runtime.lesson.LessonAction(
+              lessonId = lessonId,
+              stepId = stepId,
+              workSessionId = workSessionId,
+              type = actionType,
+              answer = answer
+            )
+            val result = lessonToolEngine.act(action)
+            output = when (result) {
+              is com.example.core.runtime.lesson.LessonActionResult.Updated -> {
+                val p = result.payload
+                isSuccess = true
+                JSONObject().apply {
+                  put("ok", true)
+                  put("lessonCard", JSONObject().apply {
+                    put("lessonId", p.lessonId)
+                    put("workSessionId", p.workSessionId ?: "")
+                    put("title", p.title)
+                    put("status", p.status.name)
+                    put("progress", JSONObject().apply {
+                      put("current", p.progress.current)
+                      put("total", p.progress.total)
+                    })
+                    put("step", JSONObject().apply {
+                      put("stepId", p.step.stepId)
+                      put("kind", p.step.kind.name)
+                      put("prompt", p.step.prompt)
+                      p.step.body?.let { put("body", it) }
+                      if (p.step.choices.isNotEmpty()) {
+                        put("choices", JSONArray(p.step.choices.map { c ->
+                          JSONObject().apply { put("id", c.id); put("label", c.label) }
+                        }))
+                      }
+                      p.step.hint?.let { put("hint", it) }
+                      p.step.feedback?.let { put("feedback", it) }
+                      put("canSkip", p.step.canSkip)
+                    })
+                    put("actions", JSONArray(p.actions.map { it.name }))
+                  })
+                }.toString(2)
+              }
+              is com.example.core.runtime.lesson.LessonActionResult.Rejected -> {
+                isSuccess = false
+                JSONObject().apply {
+                  put("ok", false)
+                  put("reason", result.reason)
+                }.toString(2)
+              }
+              is com.example.core.runtime.lesson.LessonActionResult.Failed -> {
+                isSuccess = false
+                JSONObject().apply {
+                  put("ok", false)
+                  put("error", result.error)
+                }.toString(2)
+              }
+            }
+            Log.i(TAG, "lesson.action $lessonId/$stepId/${actionType.name} → isSuccess=$isSuccess")
           }
         }
 
         "android.settings.panel" -> {
           val panel = runCatching { JSONObject(arguments).optString("panel") }.getOrDefault(arguments)
           output = deviceControl.openSettingsPanel(panel.ifBlank { "main" })
+          isSuccess = true
         }
 
         "android.vibrate" -> {
           val ms = arguments.trim().toLongOrNull() ?: 200L
           output = deviceControl.vibrate(listOf(0, ms.coerceIn(50, 3000)))
+          isSuccess = true
         }
 
         "android.browser.embed" -> {
-          // DUAL VIEW LAW: URL requests embed in PurpClaw's own browser pane,
-          // not an external app. The ViewModel observes this event to mount
-          // DualViewBrowser; execution reports routing truth.
+          // P0-7 REAL RESULT LAW: fire-and-forgotten is banned. The tool result
+          // must reflect the actual WebView page load outcome — ok=true/false from
+          // onPageFinished / onReceivedError — not an optimistic isSuccess=true.
           val url = runCatching { JSONObject(arguments).optString("url") }
             .getOrDefault(arguments.trim()).ifBlank { "https://www.google.com" }
           browserEmbedRequest.value = url
+          // Suspend until DualViewBrowser fires onPageFinished or onReceivedError.
+          // Timeout after 30s to avoid stalling the turn if the browser is killed.
+          val result = withTimeoutOrNull(30_000L) {
+            _browserEmbedResult.filter { it.url == url || it.url.startsWith(url.substringBefore("://").let { "$it://" }.take(8)) }.first()
+          } ?: BrowserEmbedResult(ok = false, url = url, title = "", error = "TIMEOUT")
           output = JSONObject().apply {
             put("action", "embed_browser")
-            put("url", url)
+            put("url", result.url)
+            put("title", result.title)
             put("surface", "DUAL_VIEW_PANE")
+            put("ok", result.ok)
+            result.error?.let { put("error", it) }
           }.toString(2)
+          isSuccess = result.ok
         }
 
         // ── CROSS-MODE CAPABILITY SPINE — 12 introspection dispatchers ──
         "system.runtime.status" -> {
           val snap = capabilitySnapshotResolver?.invoke()
-          output = if (snap == null) {
+          val json = if (snap == null) {
+            isSuccess = false
             "Capability snapshot mirror not yet wired. Live resolver not registered by ViewModel."
           } else {
+            isSuccess = true
             JSONObject().apply {
               put("mode", snap.mode.name)
               put("registered_count", snap.registeredTools.size)
               put("callable_count", snap.callableTools.size)
               put("permitted_count", snap.permittedTools.size)
               put("home_online", snap.homeStatus.online)
-              put("home_runtime_id", snap.homeStatus.runtimeId ?: JSONObject.NULL)
+              put("home_runtime_id", snap.homeStatus.runtimeId ?: "")
               put("lease_active", snap.executionLease?.isActive ?: false)
               put("snapshot_id", snap.snapshotId)
               put("captured_at_ms", snap.capturedAtMs)
@@ -920,15 +1385,19 @@ class ToolRuntimeEngine(
               })
             }.toString(2)
           }
+          output = json
         }
 
         "system.runtime.capabilities" -> {
           val snap = capabilitySnapshotResolver?.invoke()
-          output = if (snap == null) {
+          val json = if (snap == null) {
+            isSuccess = false
             "Capability snapshot mirror not yet wired."
           } else {
+            isSuccess = true
             JSONObject(snap.toMapForSerialization()).toString(2)
           }
+          output = json
         }
 
         "system.agents.list" -> {
@@ -948,6 +1417,7 @@ class ToolRuntimeEngine(
               }
             })
           }.toString(2)
+          isSuccess = true
         }
 
         "system.agent.inspect" -> {
@@ -974,6 +1444,7 @@ class ToolRuntimeEngine(
             put("plugins", JSONArray())
             put("note", "No plugins loaded in this build. Slot reserved for future extension.")
           }.toString(2)
+          isSuccess = true
         }
 
         // STEP 12.8 (2026-08-27): structured router.inspect — five named fields
@@ -1034,26 +1505,26 @@ class ToolRuntimeEngine(
           rawCandidates.take(50).forEach { c ->
             val cm = (c as? Map<*, *>) ?: return@forEach
             candidateArr.put(JSONObject().apply {
-              put("provider", cm["provider"] ?: JSONObject.NULL)
-              put("modelId", cm["modelId"] ?: cm["model"] ?: JSONObject.NULL)
-              put("free", cm["free"] ?: JSONObject.NULL)
-              put("toolCapable", cm["toolCapable"] ?: cm["toolsSupported"] ?: JSONObject.NULL)
+              put("provider", cm["provider"] ?: "")
+              put("modelId", cm["modelId"] ?: cm["model"] ?: "")
+              put("free", cm["free"] ?: false)
+              put("toolCapable", cm["toolCapable"] ?: cm["toolsSupported"] ?: false)
             })
           }
 
           // Active policy
           val rawPolicy = stateMap["activePolicy"] as? Map<*, *>
           val activePolicy = JSONObject().apply {
-            put("profile", rawPolicy?.get("profile") ?: stateMap["profile"] ?: JSONObject.NULL)
-            put("freeOnly", rawPolicy?.get("freeOnly") ?: stateMap["freeOnly"] ?: JSONObject.NULL)
-            put("spendMode", rawPolicy?.get("spendMode") ?: stateMap["spendMode"] ?: JSONObject.NULL)
+            put("profile", rawPolicy?.get("profile") ?: stateMap["profile"] ?: "")
+            put("freeOnly", rawPolicy?.get("freeOnly") ?: stateMap["freeOnly"] ?: false)
+            put("spendMode", rawPolicy?.get("spendMode") ?: stateMap["spendMode"] ?: "")
           }
 
           // Manual pin block
           val pinBlock = JSONObject().apply {
             put("active", manualPinActive)
-            put("provider", manualPinProvider ?: JSONObject.NULL)
-            put("model", manualPinModel ?: JSONObject.NULL)
+            put("provider", manualPinProvider ?: "")
+            put("model", manualPinModel ?: "")
           }
 
           // Fallback state
@@ -1062,7 +1533,7 @@ class ToolRuntimeEngine(
             ?: (stateMap["lastFallbackPath"] as? List<*>) ?: emptyList<Any>()
           val fallbackState = JSONObject().apply {
             put("enabled", fallbackEnabled)
-            put("lastPath", JSONArray().apply { fallbackTrace.take(10).forEach { put(it ?: JSONObject.NULL) } })
+            put("lastPath", JSONArray().apply { fallbackTrace.take(10).forEach { put(it ?: "") } })
           }
 
           // Real dispatch ledger read
@@ -1071,7 +1542,7 @@ class ToolRuntimeEngine(
           val latest = allReceipts.maxByOrNull { it.timestampMs }
           val latestReceiptJson: Any = latest?.let {
             JSONObject(DispatchReceipt.fromEntity(it).toMapForSerialization())
-          } ?: JSONObject.NULL
+          } ?: JSONObject()
           val decisionSourceLatest = latest?.decisionSource ?: DecisionSource.UNKNOWN.name
 
           val decisionProvenance = if (dispatchCount == 0) "MISSING" else "OK"
@@ -1090,8 +1561,8 @@ class ToolRuntimeEngine(
             put("routerEnabled", routerEnabled)
             put("selector", selector)
             put("candidateSet", candidateArr)
-            put("selectedProvider", selectedProvider ?: JSONObject.NULL)
-            put("selectedModel", selectedModel ?: JSONObject.NULL)
+            put("selectedProvider", selectedProvider ?: "")
+            put("selectedModel", selectedModel ?: "")
             put("decisionSource", decisionSourceLatest)
             put("activePolicy", activePolicy)
             put("manualPin", pinBlock)
@@ -1101,6 +1572,38 @@ class ToolRuntimeEngine(
             put("decisionProvenance", decisionProvenance)
             put("routeMode", routeMode.name)
           }.toString(2)
+          isSuccess = true
+        }
+
+        "system.router.status" -> {
+          val snapshot = routeRegistrySnapshotResolver?.invoke()
+          if (snapshot == null) {
+            isSuccess = false
+            output = JSONObject().apply {
+              put("ok", false)
+              put("registryState", RouterRegistryState.ROUTER_ONLINE_UNINITIALIZED.name)
+              put("reason", "CANONICAL_ROUTE_REGISTRY_NOT_PUBLISHED")
+            }.toString(2)
+          } else {
+            isSuccess = true
+            output = snapshot.toJson(includeRoutes = false).toString(2)
+          }
+        }
+
+        "system.router.routes.list" -> {
+          val snapshot = routeRegistrySnapshotResolver?.invoke()
+          if (snapshot == null) {
+            isSuccess = false
+            output = JSONObject().apply {
+              put("ok", false)
+              put("registryState", RouterRegistryState.ROUTER_ONLINE_UNINITIALIZED.name)
+              put("reason", "CANONICAL_ROUTE_REGISTRY_NOT_PUBLISHED")
+              put("routes", JSONArray())
+            }.toString(2)
+          } else {
+            isSuccess = true
+            output = snapshot.toJson(includeRoutes = true).toString(2)
+          }
         }
 
         // STEP 12.9 (2026-08-27): last_decision returns ONE structured
@@ -1108,16 +1611,20 @@ class ToolRuntimeEngine(
         "system.router.last_decision" -> {
           val recent = dispatchLedgerRecentReader?.invoke(1).orEmpty()
           val latest = recent.maxByOrNull { it.timestampMs }
-          output = if (latest == null) {
+          val json = if (latest == null) {
+            isSuccess = true
             JSONObject().apply {
-              put("ok", false)
-              put("reason", "no_decisions_recorded")
-              put("note", "Dispatch ledger is empty. Drive a chat turn to populate it.")
+              put("ok", true)
+              put("status", "RESULT")
+              put("decision", JSONObject())
+              put("meaning", "NO_ROUTING_DECISION_YET")
             }.toString(2)
           } else {
+            isSuccess = true
             val r = DispatchReceipt.fromEntity(latest)
             JSONObject(r.toMapForSerialization()).toString(2)
           }
+          output = json
         }
 
         // STEP 12.10 (2026-08-27): router.trace returns real DispatchReceipt rows
@@ -1130,6 +1637,7 @@ class ToolRuntimeEngine(
               put("error", "MISSING_ARG")
               put("reason", "system.router.trace requires {sessionId: String}")
             }.toString(2)
+            isSuccess = false
           } else {
             val perTurn = dispatchLedgerForTurnReader?.invoke(sessionId, 50).orEmpty()
             // Fallback to global recent when the per-turn reader has nothing.
@@ -1145,6 +1653,7 @@ class ToolRuntimeEngine(
               })
               put("decisionProvenance", if (list.isEmpty()) "MISSING" else "OK")
             }.toString(2)
+            isSuccess = true
           }
         }
 
@@ -1153,6 +1662,7 @@ class ToolRuntimeEngine(
           output = mem ?: JSONObject().apply {
             put("note", "memorySnapshotResolver not wired — MainViewModel will register at boot.")
           }.toString(2)
+          isSuccess = true
         }
 
         "system.events.query" -> {
@@ -1167,6 +1677,7 @@ class ToolRuntimeEngine(
               events.take(100).forEach { ev -> put(JSONObject(ev)) }
             })
           }.toString(2)
+          isSuccess = true
         }
 
         "system.leases.inspect" -> {
@@ -1185,6 +1696,7 @@ class ToolRuntimeEngine(
               }
             })
           }.toString(2)
+          isSuccess = true
         }
 
         // Existing introspection tools — extend with richer output.
@@ -1193,23 +1705,34 @@ class ToolRuntimeEngine(
           val ctx = runtimeContextResolver?.invoke()
           val homeOnline = homeOnlineResolver?.invoke() ?: false
           output = when (toolName) {
-            "system.runtime.get" -> ctx?.let { c ->
-              JSONObject().apply {
-                put("surface", c.surface)
-                put("device", "${c.deviceModel} · ${c.androidVersion}")
-                put("executionMode", c.executionMode)
-                put("canExecute", c.canExecute)
-                put("executionAuthority", "ANDROID_LOCAL")
-                put("inferenceLocation", c.inferenceLocation)
-                put("homeConnected", homeOnline)
-              }.toString(2)
-            } ?: "Runtime context resolver not yet wired."
+            "system.runtime.get" -> {
+              // P0-3: null resolver → error JSON (isSuccess stays false); stale ctx → error JSON
+              if (ctx == null) {
+                """{"ok":false,"error":"resolver_not_wired","stage":"cold_start"}"""
+              } else {
+                val ageMs = System.currentTimeMillis() - ctx.capturedAtMs
+                if (ageMs > ROUTING_FRESHNESS_BUDGET_MS * 3) {
+                  """{"ok":false,"error":"stale_runtime_context","capturedAtMs":${ctx.capturedAtMs},"ageMs":$ageMs}"""
+                } else {
+                  JSONObject().apply {
+                    put("surface", ctx.surface)
+                    put("device", "${ctx.deviceModel} · ${ctx.androidVersion}")
+                    put("executionMode", ctx.executionMode)
+                    put("canExecute", ctx.canExecute)
+                    put("executionAuthority", "ANDROID_LOCAL")
+                    put("inferenceLocation", ctx.inferenceLocation)
+                    put("homeConnected", homeOnline)
+                    put("capturedAtMs", ctx.capturedAtMs)
+                  }.toString(2)
+                }
+              }
+            }
             "system.capabilities.list" -> ctx?.capabilities?.entries?.joinToString("\n") {
               "${it.key}: ${if (it.value) "AVAILABLE" else "unavailable"}"
-            } ?: "Runtime context resolver not yet wired."
+            } ?: """{"ok":false,"error":"resolver_not_wired","stage":"cold_start"}"""
             "system.permissions.list" -> ctx?.permissions?.entries?.joinToString("\n") {
               "${it.key}: ${it.value}"
-            } ?: "Runtime context resolver not yet wired."
+            } ?: """{"ok":false,"error":"resolver_not_wired","stage":"cold_start"}"""
             "system.tools.list" -> {
               val mode = currentExecutionMode
               val lifecycle = com.example.core.model.InteractionMode.valueOf(mode.name)
@@ -1239,13 +1762,17 @@ class ToolRuntimeEngine(
                     put("enabled", spec.isEnabled)
                   }
                   put("state", lc.state.name)
-                  put("denial_reason", lc.reason ?: JSONObject.NULL)
+                  put("denial_reason", lc.reason ?: "")
                 }.toString(2)
               }
             }
             else -> "Home PC bridge: ${if (homeOnline) "ONLINE (optional compute node)" else "OFFLINE"}\n" +
               "Execution stays ANDROID LOCAL regardless. Provider routing is independent."
           }
+          // All branches above either set output to error JSON or valid output
+          // isSuccess stays false for error-JSON branches; set true for valid output
+          val isErrorResponse = output?.startsWith("""{"ok":false""") == true
+          if (!isErrorResponse) isSuccess = true
         }
 
         else -> {
@@ -1346,7 +1873,143 @@ class ToolRuntimeEngine(
       signature = signatureData.signature
     )
 
-    ToolExecutionResult(record = toolRecord, proofReceipt = authenticReceipt)
+    finalizeTerminalToolResult(
+      ToolExecutionResult(record = toolRecord, proofReceipt = authenticReceipt),
+      actorAgent,
+      lease
+    )
+  }
+
+  /**
+   * Canonical terminal tool finalizer. A caller never receives a tool result
+   * before its receipt and terminal lifecycle event have been written to the
+   * existing Room-backed proof/event substrate. A logging failure never
+   * reruns the tool; it is returned as explicit audit truth.
+   */
+  private suspend fun finalizeTerminalToolResult(
+    result: ToolExecutionResult,
+    actorAgent: String,
+    lease: ExecutionLease?
+  ): ToolExecutionResult {
+    val record = result.record
+    val receipt = result.proofReceipt ?: createTerminalReceipt(record, actorAgent, lease)
+    val terminalKind = if (record.isSuccess) "tool.completed" else "tool.failed"
+    return try {
+      receiptDao?.insertReceipt(receipt.toEntity())
+      val eventPersisted = recordToolLifecycleEvent(
+        terminalKind,
+        record.id,
+        record.toolName,
+        actorAgent,
+        if (record.isSuccess) "COMPLETED" else "FAILED",
+        record.output,
+        persist = canvasDao != null
+      )
+      if (receiptDao != null && canvasDao != null && !eventPersisted) {
+        error("terminal Event Spine write returned false")
+      }
+      result.copy(
+        proofReceipt = receipt,
+        auditOutcome = if (receiptDao != null && canvasDao != null) "PERSISTED" else "IN_MEMORY_ONLY",
+        overallTruth = if (record.isSuccess) "SUCCESS" else "FAILED"
+      )
+    } catch (auditError: Exception) {
+      Log.e(TAG, "Tool ${record.id} executed but terminal audit persistence failed", auditError)
+      val explicit = record.copy(
+        output = record.output + "\n[AUDIT] EXECUTION_SUCCEEDED_AUDIT_WRITE_FAILED: " +
+          (auditError.message ?: auditError::class.java.simpleName)
+      )
+      recordEvent(mutableMapOf<String, Any>(
+        "kind" to "tool.audit_write_failed",
+        "callId" to record.id,
+        "toolId" to record.toolName,
+        "sessionId" to "ses_canonical_01",
+        "ts" to System.currentTimeMillis()
+      ))
+      result.copy(
+        record = explicit,
+        proofReceipt = receipt,
+        auditOutcome = "FAILED",
+        overallTruth = if (record.isSuccess) "EXECUTION_SUCCEEDED_AUDIT_WRITE_FAILED" else "FAILED_AUDIT_WRITE_FAILED"
+      )
+    }
+  }
+
+  private fun createTerminalReceipt(
+    record: ToolCallRecord,
+    actorAgent: String,
+    lease: ExecutionLease?
+  ): ProofReceipt {
+    val now = System.currentTimeMillis()
+    val outputHash = computeSha256(record.output)
+    val draft = ProofReceipt(
+      receiptId = "rcpt_${UUID.randomUUID()}",
+      receiptType = "TOOL_EXECUTION",
+      subsystemId = "subsystem.android.toolruntime",
+      testId = "TOOL_TERMINAL_${record.toolName}",
+      deviceId = Build.FINGERPRINT,
+      nodeId = "phone-android-node-01",
+      sessionId = "ses_canonical_01",
+      startedAt = now - record.durationMs,
+      completedAt = now,
+      result = if (record.isSuccess) "PASS" else "FAIL",
+      inputHash = computeSha256(record.arguments),
+      outputHash = outputHash,
+      evidenceHash = record.evidenceHash,
+      nonce = "nonce_tool_$now",
+      verificationStatus = if (record.isSuccess) "UNVERIFIED" else "FAILED",
+      actor = "PurpClaw_ToolRuntime",
+      agent = actorAgent,
+      toolName = record.toolName,
+      modelUsed = "device-local/no-llm",
+      evidenceSummary = "Terminal result ${record.id}; duration=${record.durationMs}ms",
+      proofHash = record.evidenceHash,
+      timestamp = now,
+      executionLeaseId = lease?.leaseId.orEmpty()
+    )
+    val signature = signer.signPayload(draft.computeCanonicalPayload())
+    return draft.copy(signingKeyId = signature.signingKeyId, signature = signature.signature)
+  }
+
+  private suspend fun recordToolLifecycleEvent(
+    kind: String,
+    callId: String,
+    toolName: String,
+    actorAgent: String,
+    outcome: String,
+    payload: String,
+    persist: Boolean = false
+  ): Boolean {
+    val now = System.currentTimeMillis()
+    val payloadHash = computeSha256("$kind:$callId:$toolName:$outcome:$payload")
+    recordEvent(mutableMapOf<String, Any>(
+      "kind" to kind,
+      "callId" to callId,
+      "toolId" to toolName,
+      "outcome" to outcome,
+      "sessionId" to "ses_canonical_01",
+      "ts" to now,
+      "payloadHash" to payloadHash
+    ))
+    if (!persist) return true
+    val dao = canvasDao ?: return false
+    dao.insertEvent(
+      com.example.core.database.CanvasEventEntity(
+        eventId = "evt_${UUID.randomUUID()}",
+        canvasId = "canvas_main",
+        nodeId = callId,
+        actor = actorAgent,
+        sourceNode = "phone-android-node-01",
+        sessionId = "ses_canonical_01",
+        parentEventId = null,
+        timestamp = now,
+        logicalClock = now,
+        operation = kind,
+        payloadSummary = "$toolName $outcome callId=$callId",
+        payloadHash = payloadHash
+      )
+    )
+    return true
   }
 
   private fun computeSha256(input: String): String {
@@ -1432,6 +2095,9 @@ class ToolRuntimeEngine(
     return candidate.takeIf { it.path == root.path || it.path.startsWith(root.path + File.separator) }
   }
 }
+
+internal fun appOpenDispatchSucceeded(output: String): Boolean =
+  output.startsWith("OPENED APP:")
 
 /**
  * Best-effort reflection-free toMap() for arbitrary data classes so the

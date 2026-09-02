@@ -16,6 +16,7 @@ import com.example.core.model.RoutingState
 import com.example.core.model.SpendMode
 import com.example.core.model.SpendPolicy
 import com.example.core.network.HomeRuntimeBridge
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -76,8 +77,10 @@ data class SpendSnapshot(
 class ProviderRouter(
   private val vault: KeyStoreVault,
   private val localHost: LocalModelHost,
-  private val appContext: android.content.Context
+  private val appContext: android.content.Context,
+  private val dispatchLedgerDao: com.example.core.database.DispatchLedgerDao
 ) {
+  private val _dispatchRecorder: DispatchRecorder = DispatchRecorder(dispatchLedgerDao)
 
   companion object {
     private const val TAG = "ProviderRouter"
@@ -86,6 +89,14 @@ class ProviderRouter(
     private const val PREFS = "purpclaw_routing"
     private const val KEY_PROVIDER = "pinned_provider"
     private const val KEY_MODEL = "pinned_model"
+    // Cost incident 2026-09-01: AUTO is fail-closed away from OpenRouter
+    // until its account-side charged route is independently reconciled.
+    // Manual explicit :free picks remain executable; paid/unknown ids are
+    // rejected by callOpenRouter before a network request is created.
+    // The live account showed unexpected OpenRouter spend. AUTO therefore stays
+    // fail-closed until an independent cost audit proves the account-side route.
+    // Manual, explicitly selected zero-price routes remain available.
+    private const val OPENROUTER_AUTO_COST_HOLD = true
     private val UUID_MODEL_ID = Regex(
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
     )
@@ -99,6 +110,24 @@ class ProviderRouter(
         !UUID_MODEL_ID.matches(id) &&
         !id.contains("thinkingmachines/inkling", ignoreCase = true)
 
+    /**
+     * Chat-only filter for the OpenAI-compatible free gateways' /models
+     * listings (Groq/Cerebras/Google AI/Cloudflare). Same intent as
+     * isNimChatEndpoint but scoped to these lanes' model families
+     * (e.g. cloudflare "@cf/black-forest-labs/flux-…", "@cf/baai/bge-…").
+     */
+    internal fun isGatewayChatModelId(id: String): Boolean {
+      val lower = id.lowercase()
+      val tokens = lower.split('-', '_', '/').filter { it.isNotBlank() }.toSet()
+      val nonChat = setOf(
+        "embed", "embedding", "rerank", "retriev", "guard", "whisper", "clip",
+        "flux", "sdxl", "stable", "diffusion", "tts", "speech", "audio",
+        "image", "img", "video", "translate", "moderation", "coder",
+        "completion", "bge", "m2m100"
+      )
+      return tokens.none { it in nonChat } && !lower.contains("embedding")
+    }
+
     /** Pure classifier used by both live catalogue ingestion and TVG tests. */
     internal fun isNimChatEndpoint(id: String): Boolean {
       val lower = id.lowercase()
@@ -108,7 +137,12 @@ class ProviderRouter(
         "guard", "safety", "moderation", "ocr", "riva", "translate", "tts",
         "asr", "whisper", "clip", "voicechat", "ising", "cosmos", "streampetr",
         "sparsedrive", "bevformer", "paligemma", "synthetic", "vl", "video",
-        "audio", "denois", "speech", "starcoder", "bigcode", "coder", "completion"
+        "audio", "denois", "speech", "starcoder", "bigcode", "coder", "completion",
+        // Live NIM catalogue families which expose a model id but are not
+        // legal general-chat routes. Keep them visible in provider inventory,
+        // but never let AUTO send a conversation to them.
+        "code", "codegemma", "codellama", "codestral", "deplot", "fuyu",
+        "vision", "kosmos", "reward", "parse", "neva", "nvclip", "vila"
       )
       val hasNonChatToken = tokens.any { token ->
         nonChatTokens.any { stem -> token == stem || (stem.length > 4 && token.startsWith(stem)) }
@@ -131,23 +165,34 @@ class ProviderRouter(
       fun toolEligible(model: CatalogueModel): Boolean = !toolsRequired ||
         model.isToolCapable ||
         model.id == "openrouter/free" ||
-        // NIM's live /models response does not publish a reliable tools flag.
-        // Runtime invocation with the tools envelope is the truthful probe;
-        // unsupported endpoints fail and rotate instead of disappearing as NONE.
-        model.sourceProvider == "nim"
+        // These gateways' live /models responses do not publish a reliable
+        // tools flag. Runtime invocation with the tools envelope is the
+        // truthful probe; unsupported endpoints fail and rotate instead of
+        // disappearing as NONE.
+        model.sourceProvider in setOf("nim", "nvidia", "groq", "cerebras", "googleai", "cloudflare")
 
       val live = gateways.filter {
         it.modelClass == "chat" && it.isFree && it.available && it.configured &&
+          it.isQualifiedFree && it.pricingPrompt == 0.0 && it.pricingCompletion == 0.0 &&
           isCallableAutoModelId(it.id) && !it.isUserExcludedFromAuto &&
           !quarantined(it.id) && toolEligible(it)
       }
       val requestedRecord = live.firstOrNull { it.id == requestedModel }
-      val openRouterConcrete = live.filter {
-        it.sourceProvider == "openrouter" && it.id != "openrouter/free"
-      }.sortedWith(compareByDescending<CatalogueModel> { it.isToolCapable }.thenByDescending { it.contextLength })
-      val nimConcrete = live.filter {
-        it.sourceProvider == "nvidia" || it.sourceProvider == "nim"
-      }.sortedWith(compareByDescending<CatalogueModel> { it.isToolCapable }.thenByDescending { it.contextLength })
+      // MULTI-LANE LAW (operator 2026-09-01): AUTO interleaves EVERY gateway
+      // provider, not just OpenRouter+NIM. A bounded list filled entirely by
+      // one provider is not failover; it is six variations of the same outage.
+      // Lane priority keeps the historical openrouter→nim ordering intact for
+      // existing TVGs; new lanes join the same round-robin.
+      val lanePriority = listOf("openrouter", "nim", "nvidia", "groq", "cerebras", "googleai", "cloudflare")
+      val byProvider = live.groupBy { it.sourceProvider }
+        .mapValues { (_, models) ->
+          models.filter { it.id != "openrouter/free" }
+            .sortedWith(compareByDescending<CatalogueModel> { it.isToolCapable }.thenByDescending { it.contextLength })
+        }
+      val orderedLanes = byProvider.entries
+        .sortedWith(compareBy({ lanePriority.indexOf(it.key).let { i -> if (i < 0) lanePriority.size else i } }, { it.key }))
+        .map { it.value }
+      val maxLane = orderedLanes.maxOfOrNull { it.size } ?: 0
       return buildList {
         // AUTO's generic alias is not a real capability-qualified model. In
         // WORK it must not jump ahead of concrete live models that explicitly
@@ -155,13 +200,8 @@ class ProviderRouter(
         if (requestedRecord != null && !(toolsRequired && requestedRecord.id == "openrouter/free")) {
           add(requestedRecord.id)
         }
-        // Reserve space across gateways. A bounded list filled entirely by
-        // one provider is not failover; it is six variations of the same
-        // outage. Alternate concrete OpenRouter and NIM routes before using
-        // the generic free alias.
-        repeat(maxOf(openRouterConcrete.size, nimConcrete.size)) { index ->
-          openRouterConcrete.getOrNull(index)?.let { add(it.id) }
-          nimConcrete.getOrNull(index)?.let { add(it.id) }
+        repeat(maxLane) { index ->
+          orderedLanes.forEach { lane -> lane.getOrNull(index)?.let { add(it.id) } }
         }
         if (openRouterConfigured && !quarantined("openrouter/free")) add("openrouter/free")
       }.distinct().take(6)
@@ -217,6 +257,11 @@ class ProviderRouter(
   // -> HTTP 502 Invalid URL) and the fallback loops on the same broken route.
   private val recentFailureQuarantine = java.util.concurrent.ConcurrentHashMap<String, Long>()
   private val QUARANTINE_MS = 60_000L
+  /** Per-model errors that are permanent for that model and don't warrant 60 s quarantine. */
+  private val PER_MODEL_PERMANENT_ERRORS = listOf(
+    "model_not_found", "model does not exist", "model_terms_required",
+    "tool calling", "is not supported with this model"
+  )
   fun quarantineModel(id: String) {
     recentFailureQuarantine[id] = System.currentTimeMillis() + QUARANTINE_MS
   }
@@ -225,12 +270,6 @@ class ProviderRouter(
     return System.currentTimeMillis() < until
   }
   fun clearQuarantine(id: String) = recentFailureQuarantine.remove(id)
-
-  // STEP 12 (2026-08-27): durable routing-decision ledger. Every dispatch
-  // through this router mints a DispatchReceipt and writes it here via the
-  // optional recorder setter. Default no-op so old callers keep compiling.
-  @Volatile
-  var dispatchRecorder: DispatchRecorder? = null
 
   /** Carries per-call attribution from the caller (Initiator / source ids). */
   @Volatile
@@ -282,9 +321,12 @@ class ProviderRouter(
       estimatedCostCents = ctx.estimatedCostCents,
       errorCode = errorCode
     )
-    val recorder = dispatchRecorder ?: return receipt.dispatchId
+    val recorder = _dispatchRecorder
     return try {
       recorder.record(receipt)
+    } catch (e: CancellationException) {
+      // Coroutine was cancelled mid-persist — silently skip (fire-and-forget contract)
+      receipt.dispatchId
     } catch (e: Exception) {
       Log.w(TAG, "DispatchReceipt persist failed: ${e.message}")
       receipt.dispatchId
@@ -366,22 +408,31 @@ class ProviderRouter(
             )
           )
         }
-        // Always seed known chat models so the selector isn't empty even when
-        // the upstream /models listing is empty/stale. Tagged as default_seed.
-        if (list.isEmpty()) list.addAll(seedDirectProvider(source, knownChatModelIds))
+        // NO SEED AUTHORITY LAW (2026-09-02): a live /models call that answers
+        // with an empty listing proves the provider exposes nothing selectable
+        // right now. Installing the old hardcoded seed list here advertised
+        // model ids nobody verified — the same drift that produced dead NIM
+        // endpoints. Catalogue stays EMPTY; UNKNOWN is not a fallback list.
+        if (list.isEmpty()) {
+          Log.w(TAG, "${source.name} live /models returned EMPTY data — catalogue left empty (seed lists are not authority)")
+          clearDirectFlow(source)
+          return@withContext emptyList()
+        }
         list
       }
       if (models == null) {
-        // Fall back to seeds so the operator has something selectable.
-        seedDirectFlow(source, knownChatModelIds)
-        return knownChatModelIds.size
+        // HTTP failed: the operator must see "refresh failed", not a stale
+        // hardcoded list dressed up as a live catalogue.
+        Log.w(TAG, "${source.name} catalogue refresh failed — catalogue left empty (seed lists are not authority)")
+        clearDirectFlow(source)
+        return 0
       }
       writeDirectFlow(source, models)
       models.size
     } catch (e: Exception) {
-      Log.w(TAG, "${source.name} catalogue refresh failed: ${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
-      seedDirectFlow(source, knownChatModelIds)
-      knownChatModelIds.size
+      Log.w(TAG, "${source.name} catalogue refresh failed: ${e.javaClass.simpleName}: ${e.message ?: "(no message)"} — catalogue left empty")
+      clearDirectFlow(source)
+      0
     }
   }
 
@@ -478,9 +529,11 @@ class ProviderRouter(
     )
 
   /**
-   * MiniMax refresh — bespoke because their /v1/models shape differs from
-   * OpenAI-compatible. We probe a small allowlist of known chat models
-   * (text/general purpose) and seed them as DIRECT + configured.
+   * MiniMax refresh — refreshed EVERY boot, but truthfully labelled: MiniMax
+   * exposes no OpenAI-compatible /v1/models for chat, so the M-family ids are
+   * an OPERATOR-ATTESTED allowlist (api.minimax.io subscription, attested
+   * 2026-08-29), not live discovery. endpointSource says so — the selector and
+   * receipts must never dress this up as a live catalogue.
    */
   suspend fun refreshMinimaxCatalogue(): Int {
     val apiKey = vault.retrieveSecret(ProviderSource.MINIMAX.vaultKey)
@@ -518,7 +571,7 @@ class ProviderRouter(
         configured = true,
         available = true,
         discoveredAtMs = System.currentTimeMillis(),
-        endpointSource = "default_seed",
+        endpointSource = "attested_allowlist_2026-08-29",
         vaultKeyName = ProviderSource.MINIMAX.vaultKey
       )
     }
@@ -544,6 +597,15 @@ class ProviderRouter(
   val zaiCatalogue: StateFlow<List<CatalogueModel>> = _zaiCatalogue.asStateFlow()
   private val _longcatCatalogue = MutableStateFlow<List<CatalogueModel>>(emptyList())
   val longcatCatalogue: StateFlow<List<CatalogueModel>> = _longcatCatalogue.asStateFlow()
+  // Operator order 2026-09-01 — new AUTO gateway lanes (all OpenAI-compatible).
+  private val _groqCatalogue = MutableStateFlow<List<CatalogueModel>>(emptyList())
+  val groqCatalogue: StateFlow<List<CatalogueModel>> = _groqCatalogue.asStateFlow()
+  private val _cerebrasCatalogue = MutableStateFlow<List<CatalogueModel>>(emptyList())
+  val cerebrasCatalogue: StateFlow<List<CatalogueModel>> = _cerebrasCatalogue.asStateFlow()
+  private val _googleAiCatalogue = MutableStateFlow<List<CatalogueModel>>(emptyList())
+  val googleAiCatalogue: StateFlow<List<CatalogueModel>> = _googleAiCatalogue.asStateFlow()
+  private val _cloudflareCatalogue = MutableStateFlow<List<CatalogueModel>>(emptyList())
+  val cloudflareCatalogue: StateFlow<List<CatalogueModel>> = _cloudflareCatalogue.asStateFlow()
 
   // SPEND LAW: rolling counter in cents, persisted by caller (MainViewModel).
   // We expose getters so the UI can show "spent today / cap".
@@ -552,24 +614,37 @@ class ProviderRouter(
 
   /**
    * AUTO FREE POOL: every model the AUTO router is allowed to pick.
-   * Strict predicate — providerType=GATEWAY, sourceProvider in
-   * {openrouter, nim}, free=true, configured=true. If the operator's
-   * OpenRouter key is missing the OpenRouter slice is empty; if NIM key is
-   * missing the NIM slice is empty. AUTO NEVER touches a direct provider,
-   * no matter what the operator pinned before.
+   * MULTI-LANE LAW (operator 2026-09-01): every configured gateway joins the
+   * pool — openrouter, nim, groq, cerebras, googleai, cloudflare — no
+   * OpenRouter+NIM duopoly. A lane with a missing key simply contributes an
+   * empty slice. AUTO NEVER touches a direct provider, no matter what the
+   * operator pinned before. (OpenRouter's AUTO admission is separately held
+   * by OPENROUTER_AUTO_COST_HOLD at the call sites.)
    */
   fun queryAllFreeGateways(): List<CatalogueModel> {
-    val orConfigured = !vault.retrieveSecret(ProviderSource.OPENROUTER.vaultKey).isNullOrBlank()
-    val nimConfigured = !vault.retrieveSecret(ProviderSource.NIM.vaultKey).isNullOrBlank()
+    fun laneConfigured(source: ProviderSource): Boolean {
+      val keyPresent = !vault.retrieveSecret(source.vaultKey).isNullOrBlank()
+      if (source != ProviderSource.CLOUDFLARE) return keyPresent
+      // Cloudflare Workers AI needs the account id alongside the API token.
+      return keyPresent && !vault.retrieveSecret("CLOUDFLARE_ACCOUNT_ID").isNullOrBlank()
+    }
+    val gatewayTags = setOf("openrouter", "nim", "nvidia", "groq", "cerebras", "googleai", "cloudflare")
     return buildList {
-      if (orConfigured) addAll(_openRouterCatalogue.value)
-      if (nimConfigured) addAll(_nimCatalogue.value)
+      if (laneConfigured(ProviderSource.OPENROUTER)) addAll(_openRouterCatalogue.value)
+      if (laneConfigured(ProviderSource.NIM)) addAll(_nimCatalogue.value)
+      if (laneConfigured(ProviderSource.GROQ)) addAll(_groqCatalogue.value)
+      if (laneConfigured(ProviderSource.CEREBRAS)) addAll(_cerebrasCatalogue.value)
+      if (laneConfigured(ProviderSource.GOOGLE_AI)) addAll(_googleAiCatalogue.value)
+      if (laneConfigured(ProviderSource.CLOUDFLARE)) addAll(_cloudflareCatalogue.value)
     }.filter {
       it.providerType == ProviderType.GATEWAY &&
         it.isFree &&
+        it.isQualifiedFree &&
+        it.pricingPrompt == 0.0 &&
+        it.pricingCompletion == 0.0 &&
         it.configured &&
         it.available &&
-        (it.sourceProvider == "openrouter" || it.sourceProvider == "nim")
+        it.sourceProvider in gatewayTags
     }
   }
 
@@ -582,13 +657,36 @@ class ProviderRouter(
     addAll(_openaiCatalogue.value)
     addAll(_zaiCatalogue.value)
     addAll(_longcatCatalogue.value)
+    addAll(_googleAiCatalogue.value)
   }.filter { it.configured && it.available }
+
+  /**
+   * Exact live model records currently eligible for the existing bounded AUTO
+   * executor. Diagnostics consume this projection instead of reimplementing
+   * ranking or copying ids into a second route table.
+   */
+  fun currentAutoCatalogueCandidates(toolsRequired: Boolean = false): List<CatalogueModel> {
+    val gateways = queryAllFreeGateways().filterNot {
+      OPENROUTER_AUTO_COST_HOLD && it.sourceProvider == "openrouter"
+    }
+    val ids = buildPhoneCandidates(
+      gateways = gateways,
+      requestedModel = null,
+      toolsRequired = toolsRequired,
+      openRouterConfigured = !OPENROUTER_AUTO_COST_HOLD && vault.hasSecret("OPENROUTER_API_KEY"),
+      quarantined = ::isQuarantined
+    )
+    return ids.mapNotNull { id -> gateways.firstOrNull { it.id == id } }
+  }
 
   /** SPEND LAW: would running modelId right now exceed the operator's cap? */
   fun isSpendAllowed(model: CatalogueModel, estimatedCostCents: Double = 0.0): SpendVerdict {
     val policy = _routingState.value.spendPolicy
-    if (model.providerType != ProviderType.DIRECT || model.isFree) {
-      // Gateway traffic and direct free lanes never trip the cap.
+    if (model.isFree && model.isQualifiedFree &&
+      model.pricingPrompt == 0.0 && model.pricingCompletion == 0.0) {
+      // A gateway is a transport class, not a price class. OpenRouter carries
+      // both free and paid models; only independently qualified zero-price
+      // routes may bypass the spend gate.
       return SpendVerdict(allowed = true, reason = "free lane")
     }
     return when (policy.mode) {
@@ -618,7 +716,8 @@ class ProviderRouter(
 
   /** Record spend after a paid turn completes. Called by the caller once cost is known. */
   fun recordSpend(model: CatalogueModel, costCents: Double) {
-    if (model.providerType != ProviderType.DIRECT || model.isFree) return
+    if (model.isFree && model.isQualifiedFree &&
+      model.pricingPrompt == 0.0 && model.pricingCompletion == 0.0) return
     val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
     if (today != dailySpendDayKey) {
       dailySpendDayKey = today
@@ -726,6 +825,10 @@ class ProviderRouter(
     return when {
       model.startsWith("openrouter/") -> "openrouter"
       model.startsWith("nvidia/") || _nimCatalogue.value.any { it.id == model } -> "nvidia"
+      model.startsWith("groq/") -> "groq"
+      model.startsWith("cerebras/") -> "cerebras"
+      model.startsWith("googleai/") -> "google-ai"
+      model.startsWith("cloudflare/") -> "cloudflare"
       model.startsWith("minimax/") || model.contains("abab") -> "minimax"
       model.startsWith("longcat/") || model.startsWith("LongCat-") -> "longcat"
       model.startsWith("kimi/") -> "kimi"
@@ -817,6 +920,14 @@ class ProviderRouter(
   ): ProviderExecutionResult = withContext(Dispatchers.IO) {
     val startTime = System.currentTimeMillis()
     val state = _routingState.value
+    // PINNING AUTHORITY LAW (operator 2026-09-02): the preferredProvider string
+    // IS the authority. If "AUTO", routing runs scored-auto. If anything else,
+    // modelMode must be MANUAL and receipts must say so — no silent AUTO override.
+    val routingMode = if (preferredProvider == "AUTO") "AUTO" else "MANUAL"
+    if (routingMode == "MANUAL") {
+      Log.i(TAG, "MANUAL_PIN dispatch preferredProvider=$preferredProvider")
+    }
+    android.util.Log.i("VoiceTiming", "PROMPT_DISPATCH sessionId=$sessionId ts=${System.currentTimeMillis()} routingMode=$routingMode")
 
     // AUTO RESOLUTION LAW (2026-08-29 fix): AUTO must NOT mean "refuse if no
     // pin". When preferredProvider is AUTO, resolve a concrete eligible FREE
@@ -835,12 +946,17 @@ class ProviderRouter(
     // (openrouter/free -> "Stealth" 502, NIM starcoder2 404, hung free models);
     // we try up to 3 eligible FREE chat models, quarantining dead routes via the
     // health cache, never spinning on auth/quota (account-state, not model-health).
-    val gateways: List<CatalogueModel> = queryAllFreeGateways()
+    val gateways: List<CatalogueModel> = queryAllFreeGateways().filterNot {
+      OPENROUTER_AUTO_COST_HOLD && it.sourceProvider == "openrouter"
+    }
+    if (OPENROUTER_AUTO_COST_HOLD) {
+      Log.w(TAG, "COST_GUARD: OpenRouter excluded from AUTO pending independent charge audit; all other configured free lanes (nim/groq/cerebras/googleai/cloudflare) rotate")
+    }
     val candidates = buildPhoneCandidates(
       gateways = gateways,
       requestedModel = emergencyModel,
       toolsRequired = toolsRequired,
-      openRouterConfigured = vault.hasSecret("OPENROUTER_API_KEY"),
+      openRouterConfigured = !OPENROUTER_AUTO_COST_HOLD && vault.hasSecret("OPENROUTER_API_KEY"),
       quarantined = ::isQuarantined
     )
 
@@ -855,7 +971,7 @@ class ProviderRouter(
         errorDetail = "no eligible FREE chat model available (empty catalogue or all quarantined)"
       ))
       val receipt = RoutingReceipt(
-        routingMode = "AUTO",
+        routingMode = routingMode,
         resolvedProvider = "none",
         resolvedModel = "none",
         fallbackOccurred = false,
@@ -872,13 +988,66 @@ class ProviderRouter(
       )
     }
 
+    // OWNER-FIRST LAW (operator 2026-09-01): MiniMax is Eddie's paid sub — it goes
+    // first before any free gateway rotation WHEN the operator has NOT pinned a
+    // manual model. A manual pin (preferredProvider != "AUTO") MUST take priority
+    // over owner-first; otherwise the picker reverts to MiniMax M2.1 regardless
+    // of what was selected (regression logged 2026-09-02).
+    //
+    // Pin-honour check: if the manual pin is a direct-provider id (minimax/,
+    // kimi/, qwen/, deepseek/, etc.) AND the pin is configured, dispatch the
+    // pin as a single-shot call — no gateway rotation, no MiniMax splice. This
+    // matches the operator's explicit choice.
+    val pinIsManual = preferredProvider != "AUTO" && preferredProvider.isNotBlank()
+    val pinIsDirectProvider = pinIsManual && (
+      preferredProvider.startsWith("minimax/") || preferredProvider.startsWith("kimi/") ||
+        preferredProvider.startsWith("qwen/") || preferredProvider.startsWith("deepseek/") ||
+        preferredProvider.startsWith("openai/") || preferredProvider.startsWith("z-ai/") ||
+        preferredProvider.startsWith("longcat/") || preferredProvider.startsWith("googleai/")
+      )
+    val pinRecord = if (pinIsManual && !pinIsDirectProvider) {
+      // Gateway-pin: confirm it lives in the gateway pool. If not, fall through.
+      gateways.firstOrNull { it.id == preferredProvider }
+    } else null
+    // Normalize google-ai/ → googleai/ for direct lookup (catalogue uses googleai/)
+    val normalizedPrefProvider = if (preferredProvider.startsWith("google-ai/")) {
+      "googleai/${preferredProvider.removePrefix("google-ai/")}"
+    } else preferredProvider
+    val directPinRecord = if (pinIsDirectProvider) {
+      queryAllDirect().firstOrNull { it.id == normalizedPrefProvider }
+    } else null
+
+    val allCandidates = when {
+      // Manual pin to a direct provider that is configured → run it alone.
+      // Bypasses both owner-first MiniMax splice AND gateway rotation so the
+      // operator's explicit pick is honoured without fail-over drowning it.
+      directPinRecord != null -> listOf(directPinRecord.id)
+      // Manual pin to a gateway pool model → run it first, then gateway fallbacks,
+      // but DO NOT prepend MiniMax (owner-first) — the operator chose otherwise.
+      pinRecord != null -> listOf(pinRecord.id) + candidates.filter { it != pinRecord.id }
+      // AUTO (or unresolved manual pin) → owner-first splice, then gateway rotation.
+      // If preferredProvider carries an embedded provider prefix (e.g. "groq/qwen3.8-27b"),
+      // strip it so it becomes the bare catalog id and resolveProviderFromPin does not
+      // re-prepend the same prefix (triple-prefix bug: groq/groq/qwen3.8-27b).
+      else -> {
+        val miniMaxChatModels = _minimaxCatalogue.value.filter {
+          it.modelClass == "chat" && it.available && it.configured && !isQuarantined(it.id)
+        }.map { it.id }
+        val strippedPin = if (preferredProvider.contains("/")) {
+          val afterFirst = preferredProvider.substringAfter("/")
+          if (afterFirst.contains("/")) afterFirst.substringAfter("/") else afterFirst
+        } else preferredProvider
+        listOfNotNull(strippedPin.takeIf { it.isNotBlank() && it != preferredProvider }) + miniMaxChatModels + candidates
+      }
+    }
+
     // Attempt chain tracking for canonical receipt
     val attemptRecords = mutableListOf<com.example.core.model.AttemptRecord>()
     var servedProvider: String? = null
     var servedModel: String? = null
 
     var lastResult: ProviderExecutionResult? = null
-    for ((attemptIdx, cand) in candidates.withIndex()) {
+    for ((attemptIdx, cand) in allCandidates.withIndex()) {
       val cProvider = when (val src = resolveProviderFromPin(preferredProvider, cand)) {
         "nvidia", "nim" -> "nim"
         "openrouter" -> "openrouter"
@@ -920,6 +1089,10 @@ class ProviderRouter(
             SharedQuotaLedger.FailureClass.AUTH_REJECTED,
             SharedQuotaLedger.FailureClass.AUTH_FORBIDDEN -> com.example.core.model.AttemptOutcome.AUTH_REQUIRED
             SharedQuotaLedger.FailureClass.TIMEOUT -> com.example.core.model.AttemptOutcome.FIRST_TOKEN_TIMEOUT
+            SharedQuotaLedger.FailureClass.DEAD_ENDPOINT -> com.example.core.model.AttemptOutcome.SERVER_ERROR
+            SharedQuotaLedger.FailureClass.TOOLS_UNSUPPORTED -> com.example.core.model.AttemptOutcome.UNKNOWN_FAILURE
+            SharedQuotaLedger.FailureClass.PROMPT_TOO_LARGE,
+            SharedQuotaLedger.FailureClass.CONTEXT_TOO_SMALL -> com.example.core.model.AttemptOutcome.CONTEXT_OVERFLOW
             SharedQuotaLedger.FailureClass.OTHER -> com.example.core.model.AttemptOutcome.UNKNOWN_FAILURE
           },
           failureClass = fc.name,
@@ -953,7 +1126,7 @@ class ProviderRouter(
           statusCode = res.statusCode
         ))
         val receipt = RoutingReceipt(
-          routingMode = "AUTO",
+          routingMode = routingMode,
           resolvedProvider = cProvider,
           resolvedModel = cand,
           servedProvider = cProvider,
@@ -973,14 +1146,26 @@ class ProviderRouter(
       val fcOutcome = when (failureClass) {
         SharedQuotaLedger.FailureClass.RATE_LIMITED -> com.example.core.model.AttemptOutcome.RATE_LIMITED
         SharedQuotaLedger.FailureClass.PROVIDER_QUOTA_EXHAUSTED -> com.example.core.model.AttemptOutcome.QUOTA_EXHAUSTED
-        SharedQuotaLedger.FailureClass.AUTH -> com.example.core.model.AttemptOutcome.AUTH_REQUIRED
+        SharedQuotaLedger.FailureClass.AUTH_MISSING_KEY -> com.example.core.model.AttemptOutcome.AUTH_REQUIRED
+        SharedQuotaLedger.FailureClass.AUTH_REJECTED -> com.example.core.model.AttemptOutcome.AUTH_REQUIRED
+        SharedQuotaLedger.FailureClass.AUTH_FORBIDDEN -> com.example.core.model.AttemptOutcome.AUTH_REQUIRED
         SharedQuotaLedger.FailureClass.TIMEOUT -> com.example.core.model.AttemptOutcome.FIRST_TOKEN_TIMEOUT
+        SharedQuotaLedger.FailureClass.DEAD_ENDPOINT -> com.example.core.model.AttemptOutcome.SERVER_ERROR
+        SharedQuotaLedger.FailureClass.TOOLS_UNSUPPORTED -> com.example.core.model.AttemptOutcome.UNKNOWN_FAILURE
+        SharedQuotaLedger.FailureClass.PROMPT_TOO_LARGE,
+        SharedQuotaLedger.FailureClass.CONTEXT_TOO_SMALL -> com.example.core.model.AttemptOutcome.CONTEXT_OVERFLOW
         SharedQuotaLedger.FailureClass.OTHER -> com.example.core.model.AttemptOutcome.UNKNOWN_FAILURE
       }
       // Provider/credential state is route-local. Record it and advance to a
       // different eligible provider; never kill the whole AUTO turn because
       // one credential hit quota/auth/rate limits.
-      if (failureClass in setOf(SharedQuotaLedger.FailureClass.AUTH_MISSING_KEY, SharedQuotaLedger.FailureClass.AUTH_REJECTED, SharedQuotaLedger.FailureClass.AUTH_FORBIDDEN, SharedQuotaLedger.FailureClass.RATE_LIMITED, SharedQuotaLedger.FailureClass.PROVIDER_QUOTA_EXHAUSTED)) {
+      // Per-model permanent errors (unknown model, terms not accepted, tool-
+      // calling unsupported) are also route-local — they won't recover in 60 s.
+      val perModelPermanent = cErr != null && PER_MODEL_PERMANENT_ERRORS.any { cErr.contains(it, ignoreCase = true) }
+      // Typed route/model-local failures (dead endpoint, tool-schema rejection,
+      // oversized prompt) rotate to the next candidate — they never recover in
+      // 60s and never justify killing the whole AUTO turn.
+      if (failureClass in setOf(SharedQuotaLedger.FailureClass.AUTH_MISSING_KEY, SharedQuotaLedger.FailureClass.AUTH_REJECTED, SharedQuotaLedger.FailureClass.AUTH_FORBIDDEN, SharedQuotaLedger.FailureClass.RATE_LIMITED, SharedQuotaLedger.FailureClass.PROVIDER_QUOTA_EXHAUSTED, SharedQuotaLedger.FailureClass.DEAD_ENDPOINT, SharedQuotaLedger.FailureClass.TOOLS_UNSUPPORTED, SharedQuotaLedger.FailureClass.PROMPT_TOO_LARGE, SharedQuotaLedger.FailureClass.CONTEXT_TOO_SMALL) || perModelPermanent) {
         attemptRecords.add(com.example.core.model.AttemptRecord(
           attemptIndex = attemptIdx, provider = cProvider, model = cand,
           outcome = fcOutcome, failureClass = failureClass.name, statusCode = res.statusCode,
@@ -988,7 +1173,7 @@ class ProviderRouter(
           latencyMs = res.latencyMs,
           errorDetail = (cErr ?: "failure").take(200)
         ))
-        fallbackTrace.add("candidate '$cand' unavailable: ${failureClass.name} — rotating provider")
+        fallbackTrace.add("candidate '$cand' unavailable: ${failureClass.name}${if (perModelPermanent) " (per-model permanent)" else ""} — rotating provider")
         continue
       }
       // Transport/dead failure: quarantine + rotate to next healthy route.
@@ -1005,13 +1190,13 @@ class ProviderRouter(
     // Exhausted all eligible routes — return the last honest failure with receipt.
     val finalErr = lastResult?.errorMessage ?: "sovereign fallback exhausted eligible free models"
     val receipt = RoutingReceipt(
-      routingMode = "AUTO",
+      routingMode = routingMode,
       resolvedProvider = servedProvider ?: "none",
       resolvedModel = servedModel ?: "none",
       servedProvider = servedProvider,
       servedModel = servedModel,
       fallbackOccurred = true,
-      fallbackPath = candidates.toList(),
+      fallbackPath = allCandidates.toList(),
       routingReason = "AUTO_ALL_CANDIDATES_EXHAUSTED",
       qualityGateResult = "FAIL",
       attempts = attemptRecords
@@ -1036,10 +1221,25 @@ class ProviderRouter(
     startTime: Long,
     conversationHistory: List<Pair<String, String>> = emptyList()
   ): ProviderExecutionResult {
+    // DOUBLE-PREFIX GUARD (2026-09-02): modelId may arrive with its provider
+    // prefix already attached (e.g. "groq/qwen/qwen3.8-27b" from a prior
+    // setSelectedModel call). Strip it before any routing logic so the clean
+    // bare id is always what gets stored in prefs and passed to executors.
+    val cleanModelId = modelId.let { id ->
+      val prefix = listOf("minimax", "kimi", "qwen", "deepseek", "openai", "z-ai", "longcat", "openrouter", "nvidia", "groq", "cerebras", "googleai", "cloudflare", "local")
+        .firstOrNull { id.startsWith("${it}/") }
+      if (prefix != null) id.removePrefix("${prefix}/") else id
+    }
+
     // GOOGLE PURGE LAW — execute-layer guard: even a pinned/manual google lane refuses.
-    if (modelId.startsWith("google/") || modelId.contains("gemini", ignoreCase = true)) {
+    // EXCEPTION (operator order 2026-09-01): the googleai/ lane is the sanctioned
+    // Google AI Studio free tier under its own key and MAY execute. Everything
+    // else google/gemini stays purged (stray gateway ids, local Gemma routing).
+    val googleAiLane = cleanModelId.startsWith("googleai/") ||
+      _googleAiCatalogue.value.any { it.id == cleanModelId }
+    if (!googleAiLane && (cleanModelId.startsWith("google/") || cleanModelId.contains("gemini", ignoreCase = true))) {
       return ProviderExecutionResult(
-        content = "", providerModel = modelId, tokenCount = 0, latencyMs = 0,
+        content = "", providerModel = cleanModelId, tokenCount = 0, latencyMs = 0,
         errorMessage = "Google cloud lanes are purged from this build (local Gemma is download-only, never routed)"
       )
     }
@@ -1049,24 +1249,37 @@ class ProviderRouter(
       ProviderSource.MINIMAX, ProviderSource.KIMI, ProviderSource.QWEN,
       ProviderSource.DEEPSEEK, ProviderSource.OPENAI, ProviderSource.ZAI,
       ProviderSource.LONGCAT
-    ).firstOrNull { modelId.startsWith("${it.name.lowercase().split(" ")[0].replace("(", "").replace(")", "")}/") }
+    ).firstOrNull { cleanModelId.startsWith("${it.name.lowercase().split(" ")[0].replace("(", "").replace(")", "")}/") }
     return when {
-      modelId.startsWith("openrouter/") || _openRouterCatalogue.value.any { it.id == modelId && it.provider == "openrouter" } -> {
-        callOpenRouter(prompt, modelId, systemInstruction, conversationHistory)
+      cleanModelId.startsWith("openrouter/") || _openRouterCatalogue.value.any { it.id == cleanModelId && it.provider == "openrouter" } -> {
+        callOpenRouter(prompt, cleanModelId, systemInstruction, conversationHistory)
       }
-      modelId.startsWith("minimax/") || modelId.contains("abab") -> {
-        callMiniMaxText(prompt, modelId, systemInstruction, conversationHistory)
+      cleanModelId.startsWith("minimax/") || cleanModelId.contains("abab") -> {
+        callMiniMaxText(prompt, cleanModelId, systemInstruction, conversationHistory)
       }
-      modelId.startsWith("nvidia/") || _nimCatalogue.value.any { it.id == modelId } -> {
-        callNvidiaNim(prompt, modelId, systemInstruction, conversationHistory)
+      cleanModelId.startsWith("nvidia/") || _nimCatalogue.value.any { it.id == cleanModelId || it.id == "nvidia/$cleanModelId" } -> {
+        callNvidiaNim(prompt, cleanModelId, systemInstruction, conversationHistory)
+      }
+      // New AUTO gateway lanes (operator 2026-09-01) — all OpenAI-compatible.
+      cleanModelId.startsWith("groq/") || _groqCatalogue.value.any { it.id == cleanModelId || it.id == "groq/$cleanModelId" } -> {
+        callOpenAiCompatible(ProviderSource.GROQ, cleanModelId, prompt, systemInstruction, startTime, conversationHistory)
+      }
+      cleanModelId.startsWith("cerebras/") || _cerebrasCatalogue.value.any { it.id == cleanModelId || it.id == "cerebras/$cleanModelId" } -> {
+        callOpenAiCompatible(ProviderSource.CEREBRAS, cleanModelId, prompt, systemInstruction, startTime, conversationHistory)
+      }
+      googleAiLane -> {
+        callOpenAiCompatible(ProviderSource.GOOGLE_AI, cleanModelId, prompt, systemInstruction, startTime, conversationHistory)
+      }
+      cleanModelId.startsWith("cloudflare/") || _cloudflareCatalogue.value.any { it.id == cleanModelId || it.id == "cloudflare/$cleanModelId" } -> {
+        callOpenAiCompatible(ProviderSource.CLOUDFLARE, cleanModelId, prompt, systemInstruction, startTime, conversationHistory)
       }
       // Direct-provider dispatch (all OpenAI-compatible chat completions).
       directPrefix != null -> {
-        callOpenAiCompatible(directPrefix, modelId, prompt, systemInstruction, startTime, conversationHistory)
+        callOpenAiCompatible(directPrefix, cleanModelId, prompt, systemInstruction, startTime, conversationHistory)
       }
-      modelId.startsWith("local/") -> {
+      cleanModelId.startsWith("local/") -> {
         try {
-          val cleanId = modelId.removePrefix("local/")
+          val cleanId = cleanModelId.removePrefix("local/")
           val localResult = localHost.streamChat(cleanId, prompt) { /* stream */ }
           ProviderExecutionResult(
             content = localResult,
@@ -1077,7 +1290,7 @@ class ProviderRouter(
         } catch (e: Exception) {
           ProviderExecutionResult(
             content = "",
-            providerModel = modelId,
+            providerModel = cleanModelId,
             tokenCount = 0,
             latencyMs = System.currentTimeMillis() - startTime,
             errorMessage = "Local Model Error: ${e.message}"
@@ -1088,9 +1301,9 @@ class ProviderRouter(
         // ONE ROUTER LAW: unknown/unrouted model IDs never fall through to
         // local ranking or a cloud lane. Honest refusal — core is authority.
         ProviderExecutionResult(
-          content = "", providerModel = modelId, tokenCount = 0,
+          content = "", providerModel = cleanModelId, tokenCount = 0,
           latencyMs = System.currentTimeMillis() - startTime,
-          errorMessage = "NO_ROUTING_AUTHORITY: '$modelId' is not an emergency-pinned model; core owns routing"
+          errorMessage = "NO_ROUTING_AUTHORITY: '$cleanModelId' is not an emergency-pinned model; core owns routing"
         )
       }
     }
@@ -1110,7 +1323,25 @@ class ProviderRouter(
         content = "", providerModel = modelId, tokenCount = 0, latencyMs = 0,
         errorMessage = "401 Unauthorized: ${source.vaultKey} missing in KeystoreVault"
       )
-    val actualModel = if (modelId.contains("/")) modelId.substringAfter("/") else modelId
+    // Strip ONLY this lane's own namespace prefix. Gateway-native ids often
+    // contain slashes themselves (groq "openai/gpt-oss-120b", cloudflare
+    // "@cf/meta/llama-...") and must reach the wire intact.
+    val laneTag = when (source) {
+      ProviderSource.NIM -> "nvidia"
+      ProviderSource.GOOGLE_AI -> "googleai"
+      else -> source.name.lowercase().split(" ")[0].replace("(", "").replace(")", "")
+    }
+    val actualModel = if (modelId.startsWith("$laneTag/")) modelId.removePrefix("$laneTag/") else modelId
+    // Cloudflare Workers AI exposes its OpenAI-compatible surface under
+    // /client/v4/accounts/{id}/ai/v1 — the account id lives in the vault.
+    val effectiveBase = if (source == ProviderSource.CLOUDFLARE) {
+      val accountId = vault.retrieveSecret("CLOUDFLARE_ACCOUNT_ID")
+        ?: return ProviderExecutionResult(
+          content = "", providerModel = modelId, tokenCount = 0, latencyMs = 0,
+          errorMessage = "401 Unauthorized: CLOUDFLARE_ACCOUNT_ID missing in KeystoreVault"
+        )
+      "${source.baseUrl}/accounts/$accountId/ai/v1"
+    } else source.baseUrl
     return try {
       val payload = JSONObject().apply {
         put("model", actualModel)
@@ -1128,12 +1359,13 @@ class ProviderRouter(
         }
       }
       val request = Request.Builder()
-        .url("${source.baseUrl}/chat/completions")
+        .url("$effectiveBase/chat/completions")
         .addHeader("Authorization", "Bearer $apiKey")
         .addHeader("Content-Type", "application/json")
         .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
         .build()
       val response = httpClient.newCall(request).execute()
+      android.util.Log.i("VoiceTiming", "FIRST_MODEL_TOKEN provider=$source ts=${System.currentTimeMillis()}")
       val body = response.body?.string().orEmpty()
       if (!response.isSuccessful) {
         val errorMsg = "${source.name} HTTP ${response.code}: $body"
@@ -1226,7 +1458,11 @@ class ProviderRouter(
             m.optString("slug"),
             m.optJSONObject("function")?.optString("name").orEmpty()
           ).firstOrNull { it.isNotBlank() && it.contains('/') }.orEmpty()
-          val id = callableNimModelId(m.optString("id"), advertisedName)
+          val rawApiId = m.optString("id")
+          // Block bare NVCF function UUIDs before resolution — the resolved name
+          // from a UUID raw entry still points to a dead NVCF endpoint.
+          if (rawApiId.isBlank() || UUID_MODEL_ID.matches(rawApiId)) continue
+          val id = callableNimModelId(rawApiId, advertisedName)
           // Internal NVCF function UUIDs are not legal model values for
           // /v1/chat/completions. Never advertise them as healthy chat models.
           if (id.isBlank() || UUID_MODEL_ID.matches(id)) continue
@@ -1248,6 +1484,8 @@ class ProviderRouter(
               sourceProvider = "nim",
               description = "NVIDIA NIM · live catalog",
               contextLength = 0,
+              // All models from integrate.api.nvidia.com/v1/models are on the free
+              // endpoint. Namespace does not determine price — the endpoint does.
               isFree = true,
               isToolCapable = false,
               isVisionCapable = false,
@@ -1266,53 +1504,115 @@ class ProviderRouter(
             )
           )
         }
-        // The catalogue may contain callable-looking aliases which later map
-        // to account-private NVCF UUIDs. Always merge NVIDIA's bounded,
-        // documented chat ids so AUTO has a real public endpoint after those
-        // dynamic entries fail. Live discovery still supplies the wider list.
-        listOf(
-          "nvidia/nemotron-3.5-lightning-30b-a3b",
-          "nvidia/nemotron-3-super-120b-a12b",
-          "deepseek-ai/deepseek-v4-flash-0731",
-          "moonshotai/kimi-k2-instruct"
-        ).filterNot { fallbackId -> list.any { it.id == fallbackId } }
-          .forEach { id ->
-            list.add(
-              CatalogueModel(
-                id = id,
-                name = id.substringAfterLast('/'),
-                provider = "nvidia",
-                providerType = ProviderType.GATEWAY,
-                sourceProvider = "nim",
-                description = "NVIDIA NIM · documented chat fallback",
-                contextLength = 0,
-                isFree = true,
-                isToolCapable = false,
-                isVisionCapable = false,
-                isReasoningCapable = id.contains("thinking") || id.contains("deepseek"),
-                modelClass = "chat",
-                avgLatencyMs = 0,
-                healthStatus = "UNPROBED",
-                pricingPrompt = 0.0,
-                pricingCompletion = 0.0,
-                isQualifiedFree = true,
-                configured = true,
-                available = true,
-                discoveredAtMs = System.currentTimeMillis(),
-                endpointSource = "official_docs_fallback",
-                vaultKeyName = ProviderSource.NIM.vaultKey
-              )
-            )
-          }
         list
       }
       if (models == null) return 0
       _nimCatalogue.value = models
-      Log.i(TAG, "NIM catalogue refreshed: ${models.size} models")
+      Log.i(TAG, "NIM catalogue refreshed from live /v1/models: ${models.size} callable chat models")
+      Log.i(TAG, "NIM live chat ids=${models.joinToString { it.id }}")
       models.size
     } catch (e: Exception) {
       // e.message can be null (e.g. UnknownHostException with no message) — log class name so it's never just "failed: null"
       Log.e(TAG, "NIM catalogue refresh failed: ${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
+      0
+    }
+  }
+
+  /**
+   * Generic live catalogue refresh for the OpenAI-compatible free gateways
+   * (Groq, Cerebras, Google AI Studio, Cloudflare Workers AI — operator
+   * order 2026-09-01). GETs {base}/models with the lane's vault key and
+   * maps ids into namespaced catalogue entries ("groq/<native-id>", …) so
+   * cross-gateway id collisions can never alias a candidate. Handles both
+   * the {data:[…]} (Groq/Cerebras/Google) and {result:[…]} (Cloudflare v4)
+   * response shapes. Chat-only filter keeps embedders/audio/image/video
+   * endpoints out of the pool.
+   */
+  suspend fun refreshGatewayCatalogue(source: ProviderSource): Int {
+    val apiKey = vault.retrieveSecret(source.vaultKey)
+    if (apiKey.isNullOrBlank()) {
+      Log.w(TAG, "${source.name} catalogue refresh skipped: ${source.vaultKey} missing")
+      return 0
+    }
+    val laneTag = when (source) {
+      ProviderSource.NIM -> "nvidia"
+      ProviderSource.GOOGLE_AI -> "googleai"
+      else -> source.name.lowercase().split(" ")[0].replace("(", "").replace(")", "")
+    }
+    val base = if (source == ProviderSource.CLOUDFLARE) {
+      val accountId = vault.retrieveSecret("CLOUDFLARE_ACCOUNT_ID")
+      if (accountId.isNullOrBlank()) {
+        Log.w(TAG, "Cloudflare catalogue refresh skipped: CLOUDFLARE_ACCOUNT_ID missing")
+        return 0
+      }
+      // Chat inference uses the OpenAI-compat /ai/v1 surface, but its
+      // /models listing answers HTTP 405 on this account. The documented
+      // v4 REST listing is GET /accounts/{id}/ai/models/search, which
+      // returns the {result:[…]} shape the parser below already handles.
+      "${source.baseUrl}/accounts/$accountId/ai"
+    } else source.baseUrl
+    val listUrl = if (source == ProviderSource.CLOUDFLARE) "$base/models/search" else "$base/models"
+    return try {
+      val models = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+          .url(listUrl)
+          .addHeader("Authorization", "Bearer $apiKey")
+          .get()
+        val resp = httpClient.newCall(req.build()).execute()
+        val body = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) {
+          Log.e(TAG, "${source.name} models HTTP ${resp.code}")
+          return@withContext null
+        }
+        val root = JSONObject(body)
+        val arr = root.optJSONArray("data") ?: root.optJSONArray("result") ?: return@withContext null
+        val list = mutableListOf<CatalogueModel>()
+        for (i in 0 until arr.length()) {
+          val m = arr.optJSONObject(i) ?: continue
+          val nativeId = m.optString("id").ifBlank { m.optString("name") }
+          if (nativeId.isBlank()) continue
+          if (!isGatewayChatModelId(nativeId)) continue
+          list.add(
+            CatalogueModel(
+              id = "$laneTag/$nativeId",
+              name = nativeId.substringAfterLast('/'),
+              provider = laneTag,
+              providerType = ProviderType.GATEWAY,
+              sourceProvider = laneTag,
+              description = "${source.name} · live catalog",
+              contextLength = 0,
+              isFree = true,
+              isToolCapable = false,
+              isVisionCapable = false,
+              isReasoningCapable = false,
+              modelClass = "chat",
+              avgLatencyMs = 0,
+              healthStatus = "HEALTHY",
+              pricingPrompt = 0.0,
+              pricingCompletion = 0.0,
+              isQualifiedFree = true,
+              configured = true,
+              available = true,
+              discoveredAtMs = System.currentTimeMillis(),
+              endpointSource = "live_catalog",
+              vaultKeyName = source.vaultKey
+            )
+          )
+        }
+        list
+      }
+      if (models == null) return 0
+      when (source) {
+        ProviderSource.GROQ -> _groqCatalogue.value = models
+        ProviderSource.CEREBRAS -> _cerebrasCatalogue.value = models
+        ProviderSource.GOOGLE_AI -> _googleAiCatalogue.value = models
+        ProviderSource.CLOUDFLARE -> _cloudflareCatalogue.value = models
+        else -> return 0
+      }
+      Log.i(TAG, "${source.name} catalogue refreshed: ${models.size} chat models")
+      models.size
+    } catch (e: Exception) {
+      Log.e(TAG, "${source.name} catalogue refresh failed: ${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
       0
     }
   }
@@ -1430,17 +1730,33 @@ class ProviderRouter(
     conversationHistory: List<Pair<String, String>> = emptyList()
   ): ProviderExecutionResult {
     val startTime = System.currentTimeMillis()
-    val actualModel = if (modelName.startsWith("nvidia/")) modelName.removePrefix("nvidia/") else modelName
+    // Catalogue IDs are namespaced ("nvidia/moonshotai/kimi-k3") — strip the
+    // lane prefix; the bare id is what NIM expects on the wire. If what
+    // remains is a bare NVCF function UUID, resolve it to the catalogue's
+    // advertised name; unresolvable UUIDs fail fast (they 404 as "Function
+    // not found for account" and only waste a rotation slot).
     val apiKey = vault.retrieveSecret("NVIDIA_NIM_API_KEY")
     if (apiKey.isNullOrBlank()) {
       return ProviderExecutionResult(
-        content = "", providerModel = "nvidia/$actualModel", tokenCount = 0, latencyMs = 0,
+        content = "", providerModel = modelName, tokenCount = 0, latencyMs = 0,
         errorMessage = "401 Unauthorized: NVIDIA_NIM_API_KEY missing in KeystoreVault"
       )
     }
     return try {
+      val wireModel = modelName.removePrefix("nvidia/").let { bare ->
+        if (UUID_MODEL_ID.matches(bare)) {
+          val resolved = _nimCatalogue.value.firstOrNull { it.id == modelName }?.name.orEmpty()
+          if (resolved.isBlank() || UUID_MODEL_ID.matches(resolved)) {
+            return ProviderExecutionResult(
+              content = "", providerModel = modelName, tokenCount = 0, latencyMs = 0,
+              errorMessage = "400 Bad Request: NIM function UUID '$bare' not invocable (stale NVCF id) — model_not_found"
+            )
+          }
+          resolved
+        } else bare
+      }
       val payload = JSONObject().apply {
-        put("model", actualModel)
+        put("model", wireModel)
         put("messages", buildMessagesArray(systemInstruction, conversationHistory, prompt))
         if (pendingTools.any { it.name == "android.file.write" }) put("max_tokens", 4096)
         if (toolsWireEnabled && pendingTools.isNotEmpty()) {
@@ -1455,6 +1771,7 @@ class ProviderRouter(
         .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
         .build()
       val response = httpClient.newCall(request).execute()
+      android.util.Log.i("VoiceTiming", "FIRST_MODEL_TOKEN provider=nim ts=${System.currentTimeMillis()}")
       val body = response.body?.string().orEmpty()
       if (!response.isSuccessful) {
         val errorMsg = "NIM HTTP ${response.code}: $body"
@@ -1462,14 +1779,14 @@ class ProviderRouter(
         val lat = System.currentTimeMillis() - startTime
         persistDispatchReceipt(
           providerLabel = "nim",
-          modelIdUsed = "nvidia/$actualModel",
+          modelIdUsed = modelName,
           latencyMs = lat,
           routingReason = errorMsg,
           fallbackTrace = emptyList(),
           errorCode = errorMsg
         )
         return ProviderExecutionResult(
-          content = "", providerModel = "nvidia/$actualModel", tokenCount = 0,
+          content = "", providerModel = modelName, tokenCount = 0,
           latencyMs = lat, errorMessage = errorMsg, statusCode = response.code
         )
       }
@@ -1480,15 +1797,15 @@ class ProviderRouter(
       val lat = System.currentTimeMillis() - startTime
       persistDispatchReceipt(
         providerLabel = "nim",
-        modelIdUsed = "nvidia/$actualModel",
+        modelIdUsed = modelName,
         latencyMs = lat,
-        routingReason = "nvidia/$actualModel chat completion",
+        routingReason = "$modelName chat completion",
         fallbackTrace = emptyList(),
         errorCode = null
       )
       ProviderExecutionResult(
         content = text,
-        providerModel = "nvidia/$actualModel",
+        providerModel = modelName,
         tokenCount = usage?.optInt("total_tokens") ?: (text.split(" ").size + prompt.split(" ").size),
         latencyMs = lat,
         toolCalls = parseToolCalls(json)
@@ -1497,14 +1814,14 @@ class ProviderRouter(
       val lat = System.currentTimeMillis() - startTime
       persistDispatchReceipt(
         providerLabel = "nim",
-        modelIdUsed = "nvidia/$actualModel",
+        modelIdUsed = modelName,
         latencyMs = lat,
         routingReason = "NIM exception: ${e.message}",
         fallbackTrace = emptyList(),
         errorCode = "EXECUTOR_ERROR"
       )
       ProviderExecutionResult(
-        content = "", providerModel = "nvidia/$actualModel", tokenCount = 0,
+        content = "", providerModel = modelName, tokenCount = 0,
         latencyMs = lat,
         errorMessage = "NIM Error: ${e.message}"
       )
@@ -1521,8 +1838,24 @@ class ProviderRouter(
     conversationHistory: List<Pair<String, String>> = emptyList()
   ): ProviderExecutionResult {
     val startTime = System.currentTimeMillis()
-    val actualModel = if (modelName.startsWith("openrouter/")) modelName.removePrefix("openrouter/") else modelName
+    // `openrouter/free` is itself the canonical model id. Removing its prefix
+    // produced the ambiguous id `free`. Concrete catalogue ids such as
+    // `openai/gpt-oss-120b:free` are already wire-ready.
+    val actualModel = if (modelName == "openrouter/free") modelName
+      else if (modelName.startsWith("openrouter/")) modelName.removePrefix("openrouter/")
+      else modelName
     val apiKey = vault.retrieveSecret("OPENROUTER_API_KEY")
+
+    // Fail closed before HTTP. A free selection may only call an explicit
+    // :free model or OpenRouter's documented zero-cost free router. Stale
+    // metadata, aliases and paid ids never get a chance to spend balance.
+    val strictFreeId = actualModel == "openrouter/free" || actualModel.endsWith(":free")
+    if (!strictFreeId) {
+      return ProviderExecutionResult(
+        content = "", providerModel = "openrouter/$actualModel", tokenCount = 0, latencyMs = 0,
+        errorMessage = "PAID_ROUTE_BLOCKED: OpenRouter model '$actualModel' is not explicitly free"
+      )
+    }
 
     if (apiKey.isNullOrBlank() && !actualModel.contains(":free")) {
       return ProviderExecutionResult(
@@ -1557,6 +1890,7 @@ class ProviderRouter(
       }
 
       val response = httpClient.newCall(requestBuilder.build()).execute()
+      android.util.Log.i("VoiceTiming", "FIRST_MODEL_TOKEN provider=openrouter ts=${System.currentTimeMillis()}")
       val body = response.body?.string().orEmpty()
 
       if (!response.isSuccessful) {
@@ -1659,15 +1993,38 @@ class ProviderRouter(
           }
           put(JSONObject().apply { put("role", "user"); put("content", prompt) })
         })
+        // FUNCTION-CALLING WIRE (parity with NIM/OpenAI-compatible lanes).
+        // BUG 2026-09-02: this lane never attached `tools`, so MiniMax — the
+        // owner-first route — could only answer WORK creation prompts in
+        // prose, and every build turn died with MODEL_DID_NOT_EMIT_REQUIRED_
+        // TOOL_CALL. The endpoint is OpenAI-compatible; M-series support
+        // function calling. Same envelope, same guards as the other lanes.
+        if (pendingTools.any { it.name == "android.file.write" }) put("max_tokens", 4096)
+        if (toolsWireEnabled && pendingTools.isNotEmpty()) {
+          put("tools", canonicalToolsToWire(pendingTools))
+          put("tool_choice", pendingToolChoice)
+          lastWireTools = pendingTools
+        }
       }
 
+      // FIX 2026-09-05: /v1/text/chatcompletion_v2 is legacy and only accepts M2-her.
+      // M-series (MiniMax-M3, MiniMax-M2.7) require the OpenAI-compatible endpoint.
+      // WORK artifact turns (tools envelope with android.file.write) generate
+      // up to 4096 tokens of HTML — the shared 18s callTimeout killed them
+      // mid-generation. Extend the deadline only for those tool-bearing calls.
+      val artifactClient = if (pendingTools.any { it.name == "android.file.write" }) {
+        httpClient.newBuilder()
+          .callTimeout(120, TimeUnit.SECONDS)
+          .readTimeout(120, TimeUnit.SECONDS)
+          .build()
+      } else httpClient
       val request = Request.Builder()
-        .url("https://api.minimax.io/v1/text/chatcompletion_v2")
+        .url("https://api.minimax.io/v1/chat/completions")
         .addHeader("Authorization", "Bearer $apiKey")
         .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
         .build()
 
-      val response = httpClient.newCall(request).execute()
+      val response = artifactClient.newCall(request).execute()
       val body = response.body?.string().orEmpty()
 
       if (!response.isSuccessful) {
@@ -1683,14 +2040,22 @@ class ProviderRouter(
       }
 
       val json = JSONObject(body)
-      val reply = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("text")
+      // FIX 2026-09-05: OpenAI-compatible endpoint returns choices[0].message.content, NOT .text
+      val reply = json.optJSONArray("choices")
+        ?.optJSONObject(0)
+        ?.optJSONObject("message")
+        ?.optString("content")
         ?: json.optString("reply")
 
       ProviderExecutionResult(
         content = reply,
         providerModel = "minimax/$actualModel",
         tokenCount = reply.split(" ").size + prompt.split(" ").size,
-        latencyMs = System.currentTimeMillis() - startTime
+        latencyMs = System.currentTimeMillis() - startTime,
+        // FUNCTION-CALLING WIRE: structured tool_calls are first-class on this
+        // lane now that the envelope goes out. parseToolCalls maps wire names
+        // back to canonical registry names (see byWireName guard).
+        toolCalls = parseToolCalls(json)
       )
     } catch (e: Exception) {
       Log.e(TAG, "MiniMax text call failed: ${e.message}", e)
@@ -1717,7 +2082,7 @@ class ProviderRouter(
 
     try {
       val payload = JSONObject().apply {
-        put("model", "speech-01-turbo")
+        put("model", "speech-02-turbo")
         put("text", text)
         put("stream", false)
         put("voice_setting", JSONObject().apply {
@@ -1785,8 +2150,9 @@ class ProviderRouter(
       )
 
     try {
+      // FIX 2026-09-05: v2 API uses path param /v2/query/video_generation/{task_id}
       val request = Request.Builder()
-        .url("https://api.minimax.io/v1/query/video_generation?task_id=$taskId")
+        .url("https://api.minimax.io/v2/query/video_generation/$taskId")
         .addHeader("Authorization", "Bearer $apiKey")
         .get()
         .build()
@@ -1795,10 +2161,16 @@ class ProviderRouter(
       val body = response.body?.string().orEmpty()
       val json = JSONObject(body)
 
+      // FIX 2026-09-05: v2 response puts video URL in content[0].url (not top-level file_id)
+      val videoUrl = json.optJSONArray("content")
+        ?.optJSONObject(0)
+        ?.optString("url")
+        ?: json.optString("file_id")
+
       MiniMaxMediaResult(
         taskId = taskId,
         status = json.optString("status", "PROCESSING"),
-        mediaUrl = json.optString("file_id"),
+        mediaUrl = videoUrl,
         rawResponse = body,
         latencyMs = System.currentTimeMillis() - startTime
       )
@@ -1969,14 +2341,12 @@ class ProviderRouter(
             val description = obj.optString("description", "")
             val contextLength = obj.optInt("context_length", 32768)
             val pricing = obj.optJSONObject("pricing")
-            val promptPrice = pricing?.optDouble("prompt", 0.0) ?: 0.0
-            val completionPrice = pricing?.optDouble("completion", 0.0) ?: 0.0
-            // FREE-ONLY LAW: a model is free ONLY if the id carries :free or
-            // BOTH prompt AND completion pricing are exactly 0. A missing
-            // pricing object defaults to 0.0 on OpenRouter, so require the
-            // :free suffix when pricing is absent — never guess paid → free.
-            val isFree = id.endsWith(":free") ||
-              (pricing != null && promptPrice == 0.0 && completionPrice == 0.0)
+            val promptPrice = pricing?.optDouble("prompt", -1.0) ?: -1.0
+            val completionPrice = pricing?.optDouble("completion", -1.0) ?: -1.0
+            // Live price data outranks names and suffix folklore. AUTO only
+            // admits a route when today's upstream catalogue explicitly says
+            // both token prices are zero. Missing/unknown pricing fails closed.
+            val isFree = pricing != null && promptPrice == 0.0 && completionPrice == 0.0
             val architecture = obj.optJSONObject("architecture")
             val modality = architecture?.optString("modality", "text->text") ?: "text->text"
             val isVision = modality.contains("image")
@@ -1985,8 +2355,13 @@ class ProviderRouter(
             val modelClass = when {
               id.contains("embed", ignoreCase = true) -> "embedding"
               id.contains("rerank", ignoreCase = true) -> "reranker"
-              id.contains("guard", ignoreCase = true) || id.contains("moderation", ignoreCase = true) || id.contains("classifier", ignoreCase = true) -> "classifier"
-              id.contains("flux") || id.contains("diffusion") -> "image_gen"
+              id.contains("guard", ignoreCase = true) || id.contains("safety", ignoreCase = true) ||
+                id.contains("moderation", ignoreCase = true) || id.contains("classifier", ignoreCase = true) -> "classifier"
+              id.contains("tts", ignoreCase = true) ||
+                id.startsWith("fish-audio/") || id.startsWith("deepgram/") ||
+                modality.contains("text->speech", ignoreCase = true) ||
+                modality.contains("text->audio", ignoreCase = true) -> "tts"
+              id.contains("flux", ignoreCase = true) || id.contains("diffusion", ignoreCase = true) -> "image_gen"
               else -> "chat"
             }
 
@@ -2040,16 +2415,18 @@ class ProviderRouter(
           // FREE-ONLY LAW: purge paid lanes entirely — the selector must never
           // see a paid model, not even tagged as excluded.
           _openRouterCatalogue.value = fetchedModels.filter { it.isFree }
-          Log.i(TAG, "OpenRouter catalogue refreshed: ${_openRouterCatalogue.value.size} free of ${fetchedModels.size} total")
+          Log.i(TAG, "OpenRouter catalogue refreshed from live /api/v1/models: ${_openRouterCatalogue.value.size} free of ${fetchedModels.size} total")
+          Log.i(TAG, "OpenRouter live free ids=${_openRouterCatalogue.value.joinToString { it.id }}")
           return@withContext
         }
       }
     } catch (e: Exception) {
-      Log.w(TAG, "Failed to load live OpenRouter catalogue (${e.message}), using verified default catalogue.")
+      Log.w(TAG, "Failed to load live OpenRouter catalogue (${e.message}); retaining last live snapshot, never promoting stale seeds")
     }
 
-    // Refresh default list with current user preferences
-    initializeDefaultCatalogue()
+    // No stale model ids are promoted on refresh failure. The durable UI can
+    // still expose openrouter/free as its documented meta-router, but concrete
+    // daily models must come from the successful live endpoint response.
   }
 
   private fun initializeDefaultCatalogue() {
@@ -2213,11 +2590,15 @@ class ProviderRouter(
       // GEMINI PURGED: no Google cloud lanes, ever — local Gemma lane only.
     )
 
-    _openRouterCatalogue.value = defaultList.map { model ->
+    // Historical seeds remain in source for audit/provenance only. They are
+    // not runtime candidates: free catalogues rotate daily and live discovery
+    // is authoritative.
+    _openRouterCatalogue.value = emptyList<CatalogueModel>()
+    /*defaultList.map { model ->
       model.copy(
         isUserPreferredInAuto = userPreferredModels.contains(model.id),
         isUserExcludedFromAuto = userExcludedModels.contains(model.id)
       )
-    }
+    }*/
   }
 }

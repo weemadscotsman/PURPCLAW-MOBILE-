@@ -70,6 +70,11 @@ object SharedQuotaLedger {
         listOf("longcat", "kimi", "qwen", "deepseek", "openai", "zai").forEach {
             put(it, DEFAULT_DIRECT)
         }
+        // groq, cerebras, google-ai and cloudflare are free-gateway lanes
+        // like OpenRouter — use the same generous but bounded policy.
+        listOf("groq", "cerebras", "google-ai", "cloudflare").forEach {
+            put(it, DEFAULT_OR)
+        }
     }
 
     // ── Token-bucket state (per provider) ────────────────────────────────
@@ -304,15 +309,33 @@ object SharedQuotaLedger {
     // AUTH_MISSING_KEY  — key not in vault ("missing in KeystoreVault")
     // AUTH_REJECTED     — key in vault but rejected by provider (HTTP 401)
     // AUTH_FORBIDDEN    — provider returned HTTP 403
-    enum class FailureClass { RATE_LIMITED, PROVIDER_QUOTA_EXHAUSTED, AUTH_MISSING_KEY, AUTH_REJECTED, AUTH_FORBIDDEN, TIMEOUT, OTHER }
+    enum class FailureClass { RATE_LIMITED, PROVIDER_QUOTA_EXHAUSTED, AUTH_MISSING_KEY, AUTH_REJECTED, AUTH_FORBIDDEN, TIMEOUT, DEAD_ENDPOINT, TOOLS_UNSUPPORTED, PROMPT_TOO_LARGE, CONTEXT_TOO_SMALL, OTHER }
 
     fun classifyFailure(message: String?): FailureClass {
         val value = message.orEmpty().lowercase()
         return when {
+            // ── Typed route/model failures (2026-09-02): PROVIDER_EXCEPTION is a
+            // friendly group label, not the truth. Each class below rotates the
+            // candidate without circuit-opening the whole provider.
+            // NIM advertises chat entries that resolve to dead function UUIDs.
+            ("404" in value && ("endpoint" in value || "function" in value || "uuid" in value)) ||
+                "dead endpoint" in value -> FailureClass.DEAD_ENDPOINT
+            // Model rejects the Android tool schema (observed on Groq).
+            "tool" in value && ("not support" in value || "unsupported" in value) ->
+                FailureClass.TOOLS_UNSUPPORTED
+            // Model's context window smaller than the prompt (observed on Groq ~10k).
+            "maximum context length" in value || "context_length_exceeded" in value ||
+                "context window" in value -> FailureClass.CONTEXT_TOO_SMALL
+            "413" in value || "prompt too large" in value ||
+                ("too large" in value && "token" in value) -> FailureClass.PROMPT_TOO_LARGE
             "usage limit" in value || "quota exhausted" in value ||
                 "resource has been exhausted" in value || "add credits" in value ||
-                "insufficient credits" in value -> FailureClass.PROVIDER_QUOTA_EXHAUSTED
-            "429" in value || "rate limit" in value || "too many requests" in value -> FailureClass.RATE_LIMITED
+                "insufficient credits" in value ||
+                // Cerebras free-tier wall: HTTP 402 payment_required / quota param
+                "payment required" in value || "payment_required" in value -> FailureClass.PROVIDER_QUOTA_EXHAUSTED
+            "429" in value || "rate limit" in value || "too many requests" in value ||
+                // Groq HTTP 413: rate_limit_exceeded on tokens-per-minute budget
+                "rate_limit_exceeded" in value || "tokens per minute" in value -> FailureClass.RATE_LIMITED
             // Check missing key BEFORE general unauthorized — more specific
             "missing in KeystoreVault" in value -> FailureClass.AUTH_MISSING_KEY
             "403" in value || "forbidden" in value -> FailureClass.AUTH_FORBIDDEN
@@ -364,6 +387,10 @@ object SharedQuotaLedger {
     fun providerTagFor(modelId: String): String = when {
         modelId.startsWith("nvidia/") || modelId.contains("nim", ignoreCase = true) -> "nim"
         modelId.startsWith("openrouter/") -> "openrouter"
+        modelId.startsWith("groq/") -> "groq"
+        modelId.startsWith("cerebras/") -> "cerebras"
+        modelId.startsWith("googleai/") -> "google-ai"
+        modelId.startsWith("cloudflare/") -> "cloudflare"
         modelId.startsWith("minimax/") -> "minimax"
         modelId.startsWith("longcat/") || modelId.startsWith("LongCat-") -> "longcat"
         modelId.startsWith("kimi/") || modelId.startsWith("moonshot/") -> "kimi"

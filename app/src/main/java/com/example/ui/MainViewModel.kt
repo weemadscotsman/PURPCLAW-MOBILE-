@@ -4,18 +4,22 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
 import com.example.core.database.PurpClawDatabase
 import com.example.core.database.SnapshotEntity
 import com.example.core.database.TurnEntity
 import com.example.core.model.CompanionPetState
+import com.example.core.model.ProviderSource
 import com.example.core.model.DriveState
 import com.example.core.model.ExecutionLease
 import com.example.core.model.InteractionMode
+import com.example.ui.model.AgentChildState
+import com.example.ui.model.LiveBuildCardState
+import com.example.ui.model.StepState
 import com.example.core.model.MemoryLayer
 import com.example.core.model.MediaAttachment
 import com.example.core.model.MediaKind
 import com.example.core.model.MeshStatus
+import com.example.core.model.PreviewCardEvent
 import com.example.core.model.ModelMode
 import com.example.core.model.ProofReceipt
 import com.example.core.model.SteeringCapsule
@@ -25,6 +29,7 @@ import com.example.core.model.TurnRecord
 import com.example.core.model.VaultItem
 import com.example.core.network.HomeRuntimeBridge
 import com.example.core.runtime.AgentTowerManager
+import com.example.core.runtime.toCardData
 import com.example.core.runtime.AndroidLocalModelHost
 import com.example.core.runtime.CameraVisionEngine
 import com.example.core.runtime.BoundedToolContinuation
@@ -38,6 +43,8 @@ import com.example.core.runtime.KeyStoreVault
 import com.example.core.runtime.KeystoreReceiptSigner
 import com.example.core.runtime.MemoryGateway
 import com.example.core.runtime.ProviderRouter
+import com.example.core.runtime.CanonicalRouteRegistryBuilder
+import com.example.core.runtime.CanonicalRouteRegistrySnapshot
 import com.example.core.runtime.RuntimeContext
 import com.example.core.runtime.ProviderExecutionResult
 import com.example.core.runtime.SpendSnapshot
@@ -57,6 +64,12 @@ import com.example.core.runtime.StartupSelfCheck
 import com.example.core.runtime.SpeechRecognitionEngine
 import com.example.core.runtime.TextToSpeechEngine
 import com.example.core.runtime.ToolRuntimeEngine
+import com.example.core.runtime.DispatchResult
+import com.example.core.runtime.SteeringAnchor
+import com.example.core.runtime.SteeringContinuityStore
+import com.example.core.runtime.SteeringDelta
+import com.example.core.runtime.WorkSession
+import com.example.core.runtime.WorkSessionForegroundService
 import com.example.core.runtime.ToolIntentBoundary
 import com.example.core.runtime.lifecycleFor
 import com.example.core.runtime.toDescriptor
@@ -68,6 +81,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -107,14 +121,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   val vault = KeyStoreVault(application)
   private val providerOAuth = com.example.core.runtime.ProviderOAuthManager(vault)
   val localModelHost = AndroidLocalModelHost(application.filesDir)
-  val providerRouter = ProviderRouter(vault, localModelHost, application)
-  val ttsEngine = TextToSpeechEngine(application)
+  val providerRouter = ProviderRouter(vault, localModelHost, application, db.dispatchLedgerDao())
+  val ttsEngine = TextToSpeechEngine(application).also { engine ->
+    // TTS routing telemetry: push every routing decision to the canonical Home runtime
+    // so the PC-side stack observes which engine served each utterance.
+    engine.telemetryPusher = { state ->
+      HomeRuntimeBridge.pushTtsTelemetry(
+        engine = state.engine,
+        success = state.success,
+        reason = state.reason,
+        latencyMs = state.latencyMs,
+        voiceId = state.voiceId,
+        soulId = state.soulId,
+        detail = state.detail
+      )
+    }
+  }
   val cameraEngine = CameraVisionEngine(application)
   val speechEngine = SpeechRecognitionEngine(application)
   private val prefs = application.getSharedPreferences("purpclaw_state", android.content.Context.MODE_PRIVATE)
+  private val steeringContinuity = SteeringContinuityStore(prefs)
+  private val _queuedSteeringCount = MutableStateFlow(steeringContinuity.pendingCount())
+  val queuedSteeringCount: StateFlow<Int> = _queuedSteeringCount.asStateFlow()
   val voiceModeController = VoiceModeController(speechEngine, ttsEngine, prefs)
   val capabilityRegistry = CapabilityTruthRegistry(application, keystoreSigner)
-  val toolRuntime = ToolRuntimeEngine(application, keystoreSigner, ttsEngine, cameraEngine)
+  val toolRuntime = ToolRuntimeEngine(application, keystoreSigner, ttsEngine, cameraEngine, db.receiptDao(), db.canvasDao())
   val meshCoordinator = SessionMeshCoordinator(keystoreSigner)
   val memoryGateway = MemoryGateway(db.memoryDao())
   val agentTower = AgentTowerManager()
@@ -143,20 +174,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // chain comes from the RoutingReceipt's canonical attempts[] — never
         // reconstructed from the requested model. A turn belongs to the
         // runtime, not to a single model invocation.
-        val resolvedModel = if (preferred != "AUTO" && preferred != null) preferred
-          else resolvePhoneModel(exclude = emptySet())
-        if (resolvedModel == null) {
-          CouncilPodcastEngine.SeatAttempt.Failure(
-            reason = "No policy-eligible phone inference route is currently available",
-            latencyMs = 0L,
-            category = "NO_ELIGIBLE_ROUTE",
-            requestId = "phone-fallback-none",
-            attempts = emptyList()
-          )
-        } else {
+        // ProviderRouter is the sole candidate selector. The old
+        // resolvePhoneModel() pre-selection formed a second mini-router and could
+        // return null/stale ids before ProviderRouter ever saw the request.
+        val routedPreference = preferred?.takeUnless { it == "AUTO" } ?: "AUTO"
         val finalRes = providerRouter.generateResponse(
           prompt = prompt,
-          preferredProvider = resolvedModel,
+          preferredProvider = routedPreference,
           systemInstruction = "You are a PurpClaw council seat (sovereign fallback). Reply in character, 2-5 sentences.",
           sessionId = _activeSessionId.value,
           toolsRequired = false,
@@ -181,8 +205,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             category = when (fc) {
               SharedQuotaLedger.FailureClass.RATE_LIMITED -> "RATE_LIMITED"
               SharedQuotaLedger.FailureClass.PROVIDER_QUOTA_EXHAUSTED -> "QUOTA_EXHAUSTED"
-              SharedQuotaLedger.FailureClass.AUTH -> "AUTH_FAILED"
+              SharedQuotaLedger.FailureClass.AUTH_MISSING_KEY -> "AUTH_FAILED"
+              SharedQuotaLedger.FailureClass.AUTH_REJECTED -> "AUTH_FAILED"
+              SharedQuotaLedger.FailureClass.AUTH_FORBIDDEN -> "AUTH_FAILED"
               SharedQuotaLedger.FailureClass.TIMEOUT -> "TIMEOUT"
+              SharedQuotaLedger.FailureClass.DEAD_ENDPOINT -> "DEAD_ENDPOINT"
+              SharedQuotaLedger.FailureClass.TOOLS_UNSUPPORTED -> "TOOLS_UNSUPPORTED"
+              SharedQuotaLedger.FailureClass.PROMPT_TOO_LARGE -> "PROMPT_TOO_LARGE"
+              SharedQuotaLedger.FailureClass.CONTEXT_TOO_SMALL -> "CONTEXT_TOO_SMALL"
               SharedQuotaLedger.FailureClass.OTHER -> "NO_ELIGIBLE_ROUTE"
             },
             requestId = "phone-fallback-${receipt?.resolvedProvider ?: "mobile"}",
@@ -201,7 +231,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
               )
             }  // canonical chain from ProviderRouter's receipt
           )
-        }
         }
       }
       // Home reachability for the fallback gate (HOME-first law preserved when
@@ -224,6 +253,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   private val _activeSurface = MutableStateFlow(NavigationSurface.COMMAND)
   val activeSurface: StateFlow<NavigationSurface> = _activeSurface.asStateFlow()
+
+  // ── Live Build Preview Card state ────────────────────────────────
+  // Collects PreviewCardEvent spine from ToolRuntimeEngine and projects
+  // it into a LiveBuildCardState that LiveBuildPreviewCard can render.
+  // null = no active work session, card is hidden.
+  private val _liveBuildCardState = MutableStateFlow<LiveBuildCardState?>(null)
+  val liveBuildCardState: StateFlow<LiveBuildCardState?> = _liveBuildCardState.asStateFlow()
 
   private val _interactionMode = MutableStateFlow(
     runCatching { InteractionMode.valueOf(prefs.getString("interaction_mode", "CHAT") ?: "CHAT") }
@@ -307,9 +343,93 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   private val _isGenerating = MutableStateFlow(false)
   val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+  // ── PiP / Mochi overlay state ──────────────────────────────────────────────
+  private val _isInPip = MutableStateFlow(false)
+  val isInPip: StateFlow<Boolean> = _isInPip.asStateFlow()
+
+  private val _isPipPaused = MutableStateFlow(false)
+  val isPipPaused: StateFlow<Boolean> = _isPipPaused.asStateFlow()
+
+  /** PiP master switch — when false, auto-PiP on app minimize is suppressed. */
+  private val _isPipEnabled = MutableStateFlow(
+    prefs.getBoolean("pip_enabled", true)
+  )
+  val isPipEnabled: StateFlow<Boolean> = _isPipEnabled.asStateFlow()
+
+  fun setPipEnabled(enabled: Boolean) {
+    _isPipEnabled.value = enabled
+    prefs.edit().putBoolean("pip_enabled", enabled).apply()
+  }
+
+  /** Called by MainActivity when the system enters/exits PiP mode. */
+  fun onPipChanged(inPip: Boolean) {
+    _isInPip.value = inPip
+    if (inPip) {
+      // Pause the foreground overlay HUD while in PiP — the mini surface owns the view.
+      WorkSessionForegroundService.setAppVisible(getApplication(), false)
+    } else {
+      // Returning to full app — restore overlay HUD if session is still active.
+      WorkSessionForegroundService.setAppVisible(getApplication(), true)
+      _isPipPaused.value = false
+    }
+  }
+
+  /** Pause/resume from the PiP mini surface. */
+  fun onPauseFromPip() {
+    _isPipPaused.value = !_isPipPaused.value
+  }
+
+  /** Stop the active session from the PiP mini surface. */
+  fun onStopFromPip() {
+    cancelActiveTurn()
+    _isPipPaused.value = false
+    _isInPip.value = false
+  }
+
+  /** Confirmation request object — drives MiniSurface CONFIRMATION_NEEDED state. */
+  data class ConfirmationRequest(
+    val id: String,
+    val reason: String,
+    val detail: String
+  )
+
+  private val _pendingConfirmation = MutableStateFlow<ConfirmationRequest?>(null)
+  val pendingConfirmation: StateFlow<ConfirmationRequest?> = _pendingConfirmation.asStateFlow()
+
+  fun enqueueConfirmation(reason: String, detail: String) {
+    _pendingConfirmation.value = ConfirmationRequest(
+      id = UUID.randomUUID().toString(),
+      reason = reason,
+      detail = detail
+    )
+  }
+
+  fun dismissConfirmation() {
+    _pendingConfirmation.value = null
+  }
+
+  // ── Derived PiP surface data ────────────────────────────────────────────────
+
+  /** Task title shown in the PiP mini surface — derived from lastLiveStatus. */
+  val pipTaskTitle: String
+    get() = _lastLiveStatus.value.ifBlank {
+      if (_isGenerating.value) "Working…" else ""
+    }
+
+  /** Reply snippet shown during SPEAKING/REPLYING — first line of liveTurn content. */
+  val pipReplySnippet: String?
+    get() = _liveTurn.value?.content
+      ?.lineSequence()
+      ?.firstOrNull()
+      ?.take(64)
+      ?.takeIf { it.isNotBlank() && it.length > 4 }
+
+  // ── Active turn state ──────────────────────────────────────────────────────
   private var activeTurnJob: Job? = null
   @Volatile private var activeTurnToken: String? = null
   @Volatile private var activeTurnId: String? = null
+  @Volatile private var activeWorkServiceTurnId: String? = null
 
   private fun emitTurnEvent(kind: String, turnId: String, extra: Map<String, Any> = emptyMap()) {
     toolRuntime.recordEvent(mutableMapOf<String, Any>(
@@ -335,6 +455,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     activeTurnId = null
     ttsEngine.stop()
     job?.cancel(kotlinx.coroutines.CancellationException("operator_cancelled"))
+    if (activeWorkServiceTurnId == turnId) {
+      WorkSessionForegroundService.cancel(getApplication())
+      activeWorkServiceTurnId = null
+    }
     emitTurnEvent("turn.cancelled", turnId, mapOf("reason" to "operator"))
     _liveTurn.value = null
     _lastLiveStatus.value = "cancelled"
@@ -355,6 +479,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   private val _liveTurn = MutableStateFlow<TurnRecord?>(null)
   val liveTurn: StateFlow<TurnRecord?> = _liveTurn.asStateFlow()
+
+  /**
+   * LESSON TOOL: live lesson card projection. The LessonToolEngine (via
+   * ToolRuntimeEngine) owns lesson truth; this flow only mirrors the latest
+   * payload so the chat can render an interactive card. Cleared on CLOSE.
+   */
+  private val _activeLessonCard = MutableStateFlow<com.example.core.runtime.LessonCardData?>(null)
+  val activeLessonCard: StateFlow<com.example.core.runtime.LessonCardData?> = _activeLessonCard.asStateFlow()
 
   /** STEP 13.6 (2026-08-27): chat status row binding — was a local closure variable
    *  inside processTurn (L917) so the UI never saw it. Now a real StateFlow. */
@@ -421,6 +553,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val clean = stripToolCallBlocksFromReply(turn.content)
     if (clean.isBlank()) return
     _speakingTurnId.value = turn.id
+    _companionState.value = CompanionPetState.SPEAKING
     ttsEngine.speak(clean)
   }
 
@@ -521,9 +654,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // session-scoped lease immediately when the persisted mode is WORK; do
     // not make the operator approve an extra five-minute in-app gate.
     if (_interactionMode.value == InteractionMode.WORK) armExecutionLease()
+    // HOME-LINK DORMANCY LAW (2026-09-02): Home is NOT a provider — it is a
+    // link to the home PC that exists ONLY while the user opts in via
+    // Settings (RoutingState.useHomeRouting). Seed the bridge gate from the
+    // persisted opt-in, then keep it in lockstep with the toggle. While off,
+    // zero home probes/rosters/telemetry leave this phone; inference runs on
+    // the phone's own AUTO router catalogue (real cloud providers).
+    if (prefs.getBoolean("use_home_routing", false)) {
+      providerRouter.updateRoutingState { it.copy(useHomeRouting = true) }
+      HomeRuntimeBridge.setHomeLinkEnabled(true)
+    } else {
+      HomeRuntimeBridge.setHomeLinkEnabled(false)
+    }
+    viewModelScope.launch {
+      providerRouter.routingState.collect { st ->
+        HomeRuntimeBridge.setHomeLinkEnabled(st.useHomeRouting)
+        if (st.useHomeRouting != prefs.getBoolean("use_home_routing", false)) {
+          prefs.edit().putBoolean("use_home_routing", st.useHomeRouting).apply()
+        }
+      }
+    }
     viewModelScope.launch {
       ttsEngine.isSpeaking.collect { speaking ->
         if (!speaking) _speakingTurnId.value = null
+      }
+    }
+    // BRIDGE: VoiceMode owns SPEAKING internally; we mirror LISTENING / TRANSCRIBING
+    // from the controller into CompanionPetState so the PiP overlay reflects both loops.
+    viewModelScope.launch {
+      voiceModeController.mode.collect { mode ->
+        when (mode) {
+          VoiceMode.LISTENING -> _companionState.value = CompanionPetState.LISTENING
+          VoiceMode.TRANSCRIBING -> _companionState.value = CompanionPetState.TRANSCRIBING
+          VoiceMode.SPEAKING, VoiceMode.TTS_DRAINING -> _companionState.value = CompanionPetState.SPEAKING
+          VoiceMode.ERROR -> _companionState.value = CompanionPetState.ERROR
+          VoiceMode.OFF, VoiceMode.THINKING, VoiceMode.MUTED, VoiceMode.INTERRUPTED -> {
+            // OFF / MUTED / INTERRUPTED: don't override — the tool/reply spine owns state
+          }
+        }
+      }
+    }
+
+    // ── Live Build Preview Card event collector ──────────────────────
+    // Subscribes to the typed event spine and projects it into card state.
+    // Law: "The card must never show a fake screenshot or invent progress."
+    viewModelScope.launch {
+      toolRuntime.previewCardEvents.collect { event ->
+        _liveBuildCardState.value = reduceCardEvent(_liveBuildCardState.value, event)
       }
     }
   }
@@ -537,6 +714,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   // introspection tools read this via capabilitySnapshotResolver.
   private val _capabilitySnapshot = MutableStateFlow<com.example.core.model.CapabilitySnapshot?>(null)
   val capabilitySnapshot: StateFlow<com.example.core.model.CapabilitySnapshot?> = _capabilitySnapshot.asStateFlow()
+  private val _canonicalRouteRegistry = MutableStateFlow<CanonicalRouteRegistrySnapshot?>(null)
+  val canonicalRouteRegistry: StateFlow<CanonicalRouteRegistrySnapshot?> = _canonicalRouteRegistry.asStateFlow()
+  private var routeRegistryVersion: Long = 0L
+
+  private fun refreshCanonicalRouteRegistry(reason: String) {
+    routeRegistryVersion += 1
+    val homeOnline = meshCoordinator.meshStatus.value.let {
+      it == MeshStatus.HOME_ONLINE || it == MeshStatus.HYBRID_DEGRADED
+    }
+    val snapshot = CanonicalRouteRegistryBuilder.build(
+      providerCandidates = providerRouter.currentAutoCatalogueCandidates(),
+      directCandidates = providerRouter.queryAllDirect(),
+      tools = toolRuntime.getAvailableToolsList(homeOnline),
+      capabilities = _capabilitySnapshot.value,
+      homeOnline = homeOnline,
+      policy = providerRouter.routingState.value,
+      refreshReason = reason,
+      version = routeRegistryVersion
+    )
+    val previousHash = _canonicalRouteRegistry.value?.hash
+    _canonicalRouteRegistry.value = snapshot
+    toolRuntime.routeRegistrySnapshotResolver = { _canonicalRouteRegistry.value }
+    if (previousHash != snapshot.hash || reason == "BOOT_CATALOGUES_READY") {
+      viewModelScope.launch(Dispatchers.IO) {
+        val persisted = toolRuntime.persistRouteRegistryReceipt(snapshot)
+        if (!persisted) Log.e("MainViewModel", "Route registry published but receipt persistence failed")
+      }
+    }
+  }
 
   /**
    * Build a fresh snapshot for the current (mode, lease, homeStatus) tuple
@@ -551,7 +757,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       meshStatusNow == MeshStatus.HYBRID_DEGRADED
     val homeNodeNow = meshCoordinator.homeNode.value
     val tools = toolRuntime.getAvailableToolsList(homeOnline)
-    val descriptors = tools.map { it.toDescriptor() }
+    val degraded = capabilityRegistry.getDegradedSubsystemNames()
+    val toolTruthState: (String) -> String? = { name ->
+      when {
+        name.startsWith("android.") && "subsystem.android.toolruntime" in degraded -> "DEGRADED"
+        name.startsWith("system.") && "subsystem.android.toolruntime" in degraded -> "DEGRADED"
+        name.startsWith("android.file.") && "subsystem.android.filestorage" in degraded -> "DEGRADED"
+        name.startsWith("android.camera.") && "subsystem.android.camera" in degraded -> "DEGRADED"
+        name.startsWith("android.tts.") && "subsystem.android.tts" in degraded -> "DEGRADED"
+        name.startsWith("android.notification.") && "subsystem.android.notification" in degraded -> "DEGRADED"
+        name.startsWith("android.vibrate") && "subsystem.android.vibration" in degraded -> "DEGRADED"
+        name.startsWith("android.flashlight") && "subsystem.android.flashlight" in degraded -> "DEGRADED"
+        name.startsWith("android.clipboard.") && "subsystem.android.clipboard" in degraded -> "DEGRADED"
+        name.startsWith("android.browser.") && "subsystem.android.browser" in degraded -> "DEGRADED"
+        else -> null
+      }
+    }
+    val descriptors = tools.map { it.toDescriptor(truthState = toolTruthState(it.name)) }
     val lifecycle = computeLifecycleFor(mode, lease, homeOnline, descriptors)
     val homeStatus = com.example.core.model.HomeStatusSnapshot(
       online = homeOnline,
@@ -620,6 +842,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     toolRuntime.routingStateResolver = { providerRouter.routingState.value }
     toolRuntime.lastRoutingReceiptResolver = { providerRouter.routingState.value.lastRoutingReason }
     toolRuntime.routingTraceResolver = { _ -> emptyList() }
+    refreshCanonicalRouteRegistry("CAPABILITY_SNAPSHOT")
     toolRuntime.agentDescriptorsResolver = { agentDescriptors }
     toolRuntime.agentRosterJsonResolver = {
       val current = _agentRoster.value
@@ -743,9 +966,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     if (fresh.isEmpty()) return ""
     val lines = fresh.take(limit).mapIndexed { i, r ->
       val ageMs = (now - r.timestamp).coerceAtLeast(0L)
-      val fs = com.example.core.runtime.ToolRuntimeEngine.freshnessStatus(r.timestamp, now)
-      val tick = if (fs == "FRESH") "✓" else if (fs == "DEGRADED") "△" else "✗"
-      "${i + 1}. ${r.toolName} → ${if (r.verificationStatus == "VERIFIED") "PASS" else "FAIL"} @ +${ageMs / 1000}s (${fs}) $tick"
+      // A receipt is immutable execution evidence, not live router state.  The
+      // router's 1.5 s freshness budget must never be applied to a completed
+      // tool receipt: doing that turned every receipt older than 4.5 s into
+      // "STALE" and taught the model that successful native reads had failed.
+      // Pure reads intentionally carry UNVERIFIED because they have no
+      // separate post-state to inspect; that is not the same as FAILED.
+      val state = receiptPromptState(r.verificationStatus)
+      "${i + 1}. ${r.toolName} → $state @ +${ageMs / 1000}s"
     }
     return "[RECENT RECEIPTS — last ${fresh.size} for session ${_activeSessionId.value}]\n" +
       lines.joinToString("\n") + "\n"
@@ -758,6 +986,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
+  /**
+   * LESSON TOOL: chat-card interaction entry point. Dispatches straight to
+   * the lesson engine (no chat turn, no provider) and mirrors the updated
+   * payload into the card flow. CLOSE retires the card.
+   */
+  fun onLessonAction(action: com.example.core.runtime.lesson.LessonAction) {
+    viewModelScope.launch {
+      when (val result = toolRuntime.runLessonAction(action)) {
+        is com.example.core.runtime.lesson.LessonActionResult.Updated ->
+          _activeLessonCard.value = result.payload.toCardData()
+        is com.example.core.runtime.lesson.LessonActionResult.Rejected ->
+          Log.w("MainViewModel", "lesson.action rejected · ${result.reason}")
+        is com.example.core.runtime.lesson.LessonActionResult.Failed ->
+          Log.e("MainViewModel", "lesson.action failed · ${result.error}")
+      }
+      if (action.type == com.example.core.runtime.lesson.LessonActionType.CLOSE) {
+        _activeLessonCard.value = null
+      }
+    }
+  }
+
+  /** Parse the lessonCard object out of a lesson.start / lesson.action tool output. */
+  private fun parseLessonCard(output: String): com.example.core.runtime.LessonCardData? = runCatching {
+    val root = JSONObject(output)
+    val card = root.optJSONObject("lessonCard") ?: return@runCatching null
+    val step = card.optJSONObject("step") ?: JSONObject()
+    val progress = card.optJSONObject("progress") ?: JSONObject()
+    com.example.core.runtime.LessonCardData(
+      lessonId = card.optString("lessonId"),
+      workSessionId = card.optString("workSessionId").takeIf { it.isNotBlank() && it != "null" },
+      title = card.optString("title"),
+      status = card.optString("status"),
+      progressCurrent = progress.optInt("current", 1),
+      progressTotal = progress.optInt("total", 1),
+      step = com.example.core.runtime.LessonCardData.StepData(
+        stepId = step.optString("stepId"),
+        kind = step.optString("kind"),
+        prompt = step.optString("prompt"),
+        body = step.optString("body").takeIf { it.isNotBlank() && it != "null" },
+        choices = buildList {
+          val arr = step.optJSONArray("choices")
+          for (i in 0 until (arr?.length() ?: 0)) {
+            val c = arr?.optJSONObject(i) ?: continue
+            add(com.example.core.runtime.LessonCardData.ChoiceData(c.optString("id"), c.optString("label")))
+          }
+        },
+        hint = step.optString("hint").takeIf { it.isNotBlank() && it != "null" },
+        feedback = step.optString("feedback").takeIf { it.isNotBlank() && it != "null" },
+        canSkip = step.optBoolean("canSkip", false)
+      ),
+      actions = buildList {
+        val arr = card.optJSONArray("actions")
+        for (i in 0 until (arr?.length() ?: 0)) add(arr?.optString(i).orEmpty())
+      }
+    )
+  }.getOrNull()
+
   val turns: StateFlow<List<TurnRecord>> = _activeSessionId
     .flatMapLatest { sid -> db.turnDao().getTurnsForSession(sid) }
     .map { list ->
@@ -767,6 +1052,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         list.map { it.toDomainModel() }
           .sortedWith(compareBy<TurnRecord> { it.timestamp }.thenBy { it.sequence })
       }
+    }
+    // LESSON TOOL: project the live lesson card onto the latest assistant
+    // turn so the card stays interactive across lesson.action updates
+    // (which are UI-dispatched and don't create new chat turns).
+    .combine(_activeLessonCard) { list, card ->
+      if (card == null) return@combine list
+      val lastAsst = list.indexOfLast { it.role == "assistant" }
+      if (lastAsst < 0) list
+      else list.toMutableList().also { it[lastAsst] = it[lastAsst].copy(lessonCard = card) }
     }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), getInitialSeedTurns())
 
@@ -859,11 +1153,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       providerRouter.refreshOpenaiCatalogue()
       providerRouter.refreshZaiCatalogue()
       providerRouter.refreshLongcatCatalogue()
+      // MULTI-LANE LAW (operator 2026-09-01): new free gateways refresh at
+      // boot too — no-op (logged skip) while their keys are absent.
+      providerRouter.refreshGatewayCatalogue(ProviderSource.GROQ)
+      providerRouter.refreshGatewayCatalogue(ProviderSource.CEREBRAS)
+      providerRouter.refreshGatewayCatalogue(ProviderSource.GOOGLE_AI)
+      providerRouter.refreshGatewayCatalogue(ProviderSource.CLOUDFLARE)
       // BOOT-REFRESH LAW (operator 2026-08-28): stamp the moment this boot's
       // catalogue cycle completes so an operator can audit "did the last boot
       // actually re-fetch?" without re-running probes. Marked AFTER every
       // per-provider refresh resolves, never before. No throttle.
       providerRouter.markBootCatalogRefresh()
+      refreshCanonicalRouteRegistry("BOOT_CATALOGUES_READY")
       // STARTUP SELF-CHECK LAW: one-shot runtime bootstrap. Probes registry
       // metadata + permission state; never physically activates hardware.
       StartupSelfCheck.run(
@@ -877,6 +1178,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch {
       toolRuntime.browserEmbedRequest.collect { url ->
         if (url != null) _dualViewUrl.value = url
+      }
+    }
+    // P0-7: DualViewBrowser WebViewClient fires results here; feed to the
+    // waiting android.browser.embed handler so it can set ok=true/false.
+    viewModelScope.launch {
+      toolRuntime.browserEmbedResult.collect { result ->
+        toolRuntime.publishBrowserEmbedResult(result)
       }
     }
     // COGNITIVE SPINE PROBE: poll memory recall status every 30s so the
@@ -910,10 +1218,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
    */
   private fun seedVaultFromBuildConfig() {
     val seeds = mapOf(
-      "OPENROUTER_API_KEY" to try { BuildConfig.OPENROUTER_API_KEY } catch (_: Exception) { null },
-      "MINIMAX_API_KEY" to try { BuildConfig.MINIMAX_API_KEY } catch (_: Exception) { null },
-      "NVIDIA_NIM_API_KEY" to try { BuildConfig.NVIDIA_NIM_API_KEY } catch (_: Exception) { null },
-      "LONGCAT_API_KEY" to try { BuildConfig.LONGCAT_API_KEY } catch (_: Exception) { null },
+      "OPENROUTER_API_KEY" to readInjectedBuildConfig("OPENROUTER_API_KEY"),
+      "MINIMAX_API_KEY" to readInjectedBuildConfig("MINIMAX_API_KEY"),
+      "NVIDIA_NIM_API_KEY" to readInjectedBuildConfig("NVIDIA_NIM_API_KEY"),
+      "LONGCAT_API_KEY" to readInjectedBuildConfig("LONGCAT_API_KEY"),
+      // Free gateway lanes added 2026-09-01 — Operator seeded all four into
+      // the desktop vault. Mirrors the lane catalogue boot-refresh so the
+      // AUTO pool actually has resolvable candidates.
+      "GROQ_API_KEY" to readInjectedBuildConfig("GROQ_API_KEY"),
+      "CEREBRAS_API_KEY" to readInjectedBuildConfig("CEREBRAS_API_KEY"),
+      "GOOGLE_AI_API_KEY" to readInjectedBuildConfig("GOOGLE_AI_API_KEY"),
+      "CLOUDFLARE_API_KEY" to readInjectedBuildConfig("CLOUDFLARE_API_KEY"),
+      "CLOUDFLARE_ACCOUNT_ID" to readInjectedBuildConfig("CLOUDFLARE_ACCOUNT_ID"),
       // Direct providers — BuildConfig fields are added per build by the
       // Secrets plugin. Until the operator wires a key the seed is null and
       // the catalogue stays empty (selector renders "Add API key" tile).
@@ -931,6 +1247,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     if (seeded > 0) Log.i("MainViewModel", "Vault seeded $seeded provider key(s) from build config")
   }
+
+  /**
+   * BuildConfig is generated by Gradle and may be absent from an incremental
+   * Kotlin source set. Reflection keeps the first-run secret handoff optional
+   * without making the UI process fail to compile or launch.
+   */
+  private fun readInjectedBuildConfig(field: String): String? = runCatching {
+    Class.forName("com.example.BuildConfig").getField(field).get(null) as? String
+  }.getOrNull()
 
   // (Spend-policy StateFlows are declared earlier so init { } can call
   //  primeDailySpendFromPrefs() without hitting an uninitialised field.)
@@ -964,6 +1289,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       .putInt("spend_per_job_cap_cents", policy.perJobCapCents)
       .apply()
     providerRouter.setSpendPolicy(policy)
+    viewModelScope.launch { refreshCanonicalRouteRegistry("SPEND_POLICY_CHANGED") }
     val snap = providerRouter.snapshotSpend()
     _spendSnapshot.value = SpendSnapshot(snap.spentCentsToday, policy.dailyCapCents, policy.mode)
   }
@@ -1062,6 +1388,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     prefs.edit().putString("selected_companion", name).apply()
   }
 
+  /**
+   * CANONICAL MODEL PICK (2026-09-02): the picker row already knows its
+   * provider group AND the full catalogue id — pin both directly. No
+   * bare-name catalogue guessing on the normal path; provider roulette is
+   * over. Bare-name recovery survives only in the single-arg legacy
+   * overload below.
+   */
+  fun setSelectedModel(providerTag: String, model: String) {
+    _selectedModel.value = model
+    prefs.edit()
+      .putString("selected_model", model)
+      .putString("selected_model_provider", providerTag)
+      .apply()
+    providerRouter.setSelectedModel(canonicalProviderId(providerTag), model)
+    viewModelScope.launch { refreshCanonicalRouteRegistry("MODEL_SELECTION_CHANGED") }
+  }
+
+  /** Picker row provider tag → canonical router provider id. */
+  private fun canonicalProviderId(tag: String): String = when (tag.uppercase()) {
+    "OPENROUTER" -> "openrouter"
+    "NVIDIA_NIM" -> "nvidia"
+    "MINIMAX" -> "minimax"
+    "GROQ" -> "groq"
+    "CEREBRAS" -> "cerebras"
+    "GOOGLE_AI" -> "google-ai"
+    "CLOUDFLARE" -> "cloudflare"
+    "KIMI" -> "kimi"
+    "QWEN" -> "qwen"
+    "DEEPSEEK" -> "deepseek"
+    "OPENAI" -> "openai"
+    "ZAI" -> "z-ai"
+    "LONGCAT" -> "longcat"
+    "AUTO" -> "auto"
+    else -> tag.lowercase()
+  }
+
+  /**
+   * LEGACY bare-name fallback — kept for callers that only have a model id
+   * (deep links, old persisted values). The picker must NOT use this path.
+   */
   fun setSelectedModel(model: String) {
     _selectedModel.value = model
     prefs.edit().putString("selected_model", model).apply()
@@ -1069,15 +1435,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // MANUAL and the provider pins — no silent candidate hopping. AUTO restores.
     if (model == "AUTO") {
       providerRouter.setSelectedModel("auto", "AUTO")
-    } else if (model.startsWith("openrouter/")) {
-      providerRouter.setSelectedModel("openrouter", model)
-    } else if (model.startsWith("minimax/")) {
-      providerRouter.setSelectedModel("minimax", model)
-    } else if (model.startsWith("nvidia/")) {
-      providerRouter.setSelectedModel("nvidia", model)
+    } else if (model.startsWith("openrouter/") || model.startsWith("minimax/") ||
+               model.startsWith("nvidia/") || model.startsWith("groq/") ||
+               model.startsWith("cerebras/") || model.startsWith("deepseek/") ||
+               model.startsWith("kimi/") || model.startsWith("qwen/") ||
+               model.startsWith("longcat/")) {
+      // Already qualified: extract provider from prefix.
+      val provider = when {
+        model.startsWith("openrouter/") -> "openrouter"
+        model.startsWith("minimax/") -> "minimax"
+        model.startsWith("nvidia/") -> "nvidia"
+        model.startsWith("groq/") -> "groq"
+        model.startsWith("cerebras/") -> "cerebras"
+        model.startsWith("deepseek/") -> "deepseek"
+        model.startsWith("kimi/") -> "kimi"
+        model.startsWith("qwen/") -> "qwen"
+        model.startsWith("longcat/") -> "longcat"
+        else -> "openrouter"
+      }
+      providerRouter.setSelectedModel(provider, model)
     } else {
-      providerRouter.setSelectedModel("openrouter", "openrouter/$model")
+      // BARE MODEL ID bug fix (2026-09-01): bare IDs like "M2.7" or "M3" are
+      // UI display names, not catalog IDs. Look up the full catalog ID so the
+      // router can preprend the exact pinned model to the candidate list. If
+      // not found, fall back to wrapping as openrouter/<model> (old behavior).
+      val allModels = providerRouter.queryAllFreeGateways() +
+                      providerRouter.nimCatalogue.value
+      val resolved = allModels.find {
+        it.id.endsWith("/$model") || it.id.equals(model, ignoreCase = true)
+      }
+      if (resolved != null) {
+        providerRouter.setSelectedModel(resolved.sourceProvider, resolved.id)
+      } else {
+        providerRouter.setSelectedModel("openrouter", "openrouter/$model")
+      }
     }
+    viewModelScope.launch { refreshCanonicalRouteRegistry("MODEL_SELECTION_CHANGED") }
   }
 
   fun updateInputText(text: String) {
@@ -1148,9 +1541,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     val eligible = gateways.filter {
       val id = it.id.lowercase()
+      // isFree + isQualifiedFree already filter to genuinely free models.
+      // isNimChatEndpoint already removed embed/rerank/audio/video/coder models.
+      // Further hardcode exclusions here only if a specific model family is
+      // confirmed broken at the API level — not on assumption.
       it.id !in exclude && !providerRouter.isQuarantined(it.id) && it.modelClass == "chat" && it.isFree && it.configured && it.available &&
-        !id.startsWith("google/") && !id.startsWith("thinkingmachines/") &&
-        !id.contains("content-safety") && !id.contains("lyria")
+        !id.contains("content-safety")  // content-safety models are not chat endpoints
     }
     val failedSources = gateways.filter { it.id in exclude }.map { it.sourceProvider }.toSet()
     fun score(model: com.example.core.model.CatalogueModel): Int {
@@ -1407,6 +1803,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _pendingMediaAttachments = MutableStateFlow<List<MediaAttachment>>(emptyList())
   val pendingMediaAttachments: StateFlow<List<MediaAttachment>> = _pendingMediaAttachments.asStateFlow()
 
+  /** TASK #104: last Plus-sheet action outcome, shown as a truthful chip/toast line. */
+  private val _lastPlusAction = MutableStateFlow<String?>(null)
+  val lastPlusAction: StateFlow<String?> = _lastPlusAction.asStateFlow()
+
   /**
    * QUEUE LAW: a message sent while busy is PERSISTED to the queue immediately,
    * rendered as queued, and processed in order. Never dropped.
@@ -1416,11 +1816,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     if (prompt.isBlank()) return
     _inputText.value = ""
     if (_isGenerating.value) {
-      sendQueue.add(prompt)
-      persistSendQueue()
+      val anchoredTurnId = activeTurnId ?: activeWorkServiceTurnId ?: activeTurnToken ?: "turn_unknown"
+      val objective = prefs.getString("active_work_objective", null)
+        ?.takeIf { it.isNotBlank() }
+        ?: turns.value.lastOrNull { it.role == "user" }?.content
+        ?: prompt
+      val snapshot = steeringContinuity.append(
+        anchor = SteeringAnchor(
+          workSessionId = activeWorkServiceTurnId ?: anchoredTurnId,
+          anchorTurnId = anchoredTurnId,
+          anchorMessageId = "active_message_$anchoredTurnId",
+          executionCheckpointId = "checkpoint_$anchoredTurnId",
+          activeGoal = objective,
+          planRevision = prefs.getInt("active_plan_revision", 1),
+          activeToolStep = _lastLiveStatus.value
+        ),
+        rawText = prompt
+      )
+      _queuedSteeringCount.value = snapshot.pendingCount
+      if (snapshot.messages.size == 1) {
+        emitTurnEvent("steering.session.started", anchoredTurnId, mapOf(
+          "steering_session_id" to snapshot.steeringSessionId,
+          "checkpoint_id" to snapshot.anchor.executionCheckpointId
+        ))
+      }
+      emitTurnEvent("steering.message.received", anchoredTurnId, mapOf(
+        "steering_session_id" to snapshot.steeringSessionId,
+        "sequence" to snapshot.messages.last().sequence,
+        "pending_count" to snapshot.pendingCount
+      ))
+      _lastLiveStatus.value = "steering · ${snapshot.pendingCount} queued"
+      if (snapshot.status == com.example.core.runtime.SteeringSessionStatus.CANCELLED) {
+        cancelActiveTurn()
+      }
       return
     }
     processTurn(prompt)
+  }
+
+  /** Hard hook used before consequential tools/model continuations/finalization. */
+  private suspend fun ingestPendingSteering(turnId: String, force: Boolean): SteeringDelta? {
+    val pending = steeringContinuity.load() ?: return null
+    if (pending.pendingCount == 0) return null
+    if (force) {
+      val remaining = (pending.quietWindowMs -
+        (System.currentTimeMillis() - pending.lastMessageAt)).coerceAtLeast(0L)
+      if (remaining > 0L) delay(remaining)
+    }
+    emitTurnEvent("steering.burst.closed", turnId, mapOf(
+      "steering_session_id" to pending.steeringSessionId,
+      "messages_received" to pending.messages.size
+    ))
+    emitTurnEvent("steering.ingestion.started", turnId, mapOf(
+      "steering_session_id" to pending.steeringSessionId
+    ))
+    val delta = steeringContinuity.ingest(force = force) ?: return null
+    _queuedSteeringCount.value = steeringContinuity.pendingCount()
+    prefs.edit()
+      .putInt("active_plan_revision", delta.planRevisionAfter)
+      .putString("active_steering_delta", delta.contextBlock())
+      .apply()
+    emitTurnEvent("steering.delta.created", turnId, mapOf(
+      "steering_session_id" to delta.steeringSessionId,
+      "messages_ingested" to delta.messagesIngested,
+      "source_message_ids" to delta.sourceMessageIds.joinToString(","),
+      "plan_revision_before" to delta.planRevisionBefore,
+      "plan_revision_after" to delta.planRevisionAfter
+    ))
+    emitTurnEvent("steering.ingestion.completed", turnId, mapOf(
+      "steering_session_id" to delta.steeringSessionId,
+      "messages_ingested" to delta.messagesIngested
+    ))
+    emitTurnEvent("steering.plan.updated", turnId, mapOf(
+      "plan_revision" to delta.planRevisionAfter
+    ))
+    _lastLiveStatus.value = "steering ${delta.messagesIngested}/${delta.messagesIngested} ingested · resuming"
+    return delta
   }
 
   private fun drainQueue() {
@@ -1429,8 +1900,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     processTurn(next)
   }
 
+  /**
+   * Narrow continuation detector. It only inherits an unfinished WORK
+   * objective for explicit anaphoric/continuation language; an unrelated new
+   * request never gets silently merged into the old job.
+   */
+  private fun isContinuationPhrase(prompt: String): Boolean {
+    val normalized = prompt.trim().lowercase()
+    return Regex(
+      "^(ok(ay)?[,. ]+|right[,. ]+|yes[,. ]+|yeah[,. ]+)?" +
+        "(go ahead|do that|do it|continue|carry on|proceed|keep going|we'll do that|we will do that|make it|finish it)\\b"
+    ).containsMatchIn(normalized)
+  }
+
   private fun processTurn(prompt: String) {
     val currentMode = _interactionMode.value
+    val storedWorkObjective = prefs.getString("active_work_objective", "").orEmpty()
+    val isNewArtifactGoal = currentMode == InteractionMode.WORK &&
+      ToolIntentBoundary.isArtifactCreationGoal(prompt)
+    val isWorkContinuation = currentMode == InteractionMode.WORK &&
+      storedWorkObjective.isNotBlank() && isContinuationPhrase(prompt)
+    val executionPrompt = if (isWorkContinuation) {
+      buildString {
+        appendLine("Continue the existing WORK objective without replacing it:")
+        appendLine(storedWorkObjective)
+        appendLine()
+        append("Latest operator instruction: ").append(prompt)
+      }
+    } else prompt
+    if (isNewArtifactGoal) {
+      prefs.edit().putString("active_work_objective", prompt).apply()
+    }
     synchronized(delegatedThisTurn) { delegatedThisTurn.clear() }
     _isGenerating.value = true
     voiceModeController.notifyThinking()   // voice loop: LISTENING -> THINKING on send
@@ -1519,9 +2019,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         InteractionMode.WORK -> "arming tools"
         else -> "thinking"
       }
+      if (currentMode == InteractionMode.WORK) {
+        activeWorkServiceTurnId = liveTurnId
+        WorkSessionForegroundService.start(
+          getApplication(),
+          liveTurnId,
+          if (isWorkContinuation) storedWorkObjective else prompt
+        )
+        // Live Build Preview Card: WorkStarted event
+        toolRuntime.emitWorkEvent(PreviewCardEvent.WorkStarted(
+          sessionId = _activeSessionId.value,
+          workSessionId = liveTurnId,
+          objective = if (isWorkContinuation) storedWorkObjective else prompt
+        ))
+      }
       fun pushLive(status: String) {
         liveStatus = status
         _lastLiveStatus.value = status  // STEP 13.6: publish to UI
+        if (currentMode == InteractionMode.WORK && activeWorkServiceTurnId == liveTurnId) {
+          WorkSessionForegroundService.progress(getApplication(), status)
+          val workStatus = when {
+            status.contains("verif", ignoreCase = true) || status.contains("inspect", ignoreCase = true) ->
+              WorkSession.Status.VERIFYING
+            status.contains("speaking", ignoreCase = true) ||
+              status.contains("respond", ignoreCase = true) ||
+              status.contains("composing", ignoreCase = true) -> WorkSession.Status.RESPONDING
+            status.contains("continuing", ignoreCase = true) ||
+              status.contains("observ", ignoreCase = true) ||
+              status.contains("tool result", ignoreCase = true) -> WorkSession.Status.OBSERVING
+            status.contains("execut", ignoreCase = true) ||
+              status.contains("tool requested", ignoreCase = true) ||
+              status.contains("running", ignoreCase = true) -> WorkSession.Status.EXECUTING
+            else -> WorkSession.Status.PLANNING
+          }
+          toolRuntime.emitWorkEvent(PreviewCardEvent.WorkPhaseChanged(
+            sessionId = _activeSessionId.value,
+            workSessionId = liveTurnId,
+            status = workStatus,
+            label = status
+          ))
+          _companionState.value = when (workStatus) {
+            WorkSession.Status.PLANNING -> CompanionPetState.PLANNING
+            WorkSession.Status.EXECUTING -> CompanionPetState.RUNNING
+            WorkSession.Status.OBSERVING, WorkSession.Status.VERIFYING -> CompanionPetState.VERIFYING
+            WorkSession.Status.RESPONDING -> CompanionPetState.REPLYING
+            else -> _companionState.value
+          }
+        }
         _liveTurn.value = TurnRecord(
           id = liveTurnId,
           sessionId = _activeSessionId.value,
@@ -1556,30 +2100,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         InteractionMode.WORK -> _companionState.value = CompanionPetState.RUNNING
       }
 
-      // RUNTIME TRUTH: Home reachable (even HYBRID_DEGRADED) => chat relays
-      // through the canonical runtime. Only a true reachability failure goes local.
-      // PER-TURN FRESHNESS LAW: mesh status is boot-time stale — core can die
-      // mid-session. Probe NOW so the pill and the routing decision use live truth.
-      meshCoordinator.probeHomeNode()
+      // Home is an execution/coordination node, not an inference provider.
+      // Refresh its reachability in parallel; never put a bridge probe in front
+      // of the phone provider router or make chat wait for a PC timeout.
+      launch { meshCoordinator.probeHomeNode() }
       val homeReachable = meshCoordinator.meshStatus.value == MeshStatus.HOME_ONLINE ||
         meshCoordinator.meshStatus.value == MeshStatus.HYBRID_DEGRADED
       val toolCallsList = mutableListOf<ToolCallRecord>()
       var generatedProof: ProofReceipt? = null
+      var activeSteeringBlock = prefs.getString("active_steering_delta", "").orEmpty()
 
+      _companionState.value = CompanionPetState.PLANNING
       pushLive("routing intent")
 
       // 3. TOOL ROUTING — one resolver, no substring folklore.
       // CHAT: read-only/self-inspection tools allowed; mutating tools get a
       // policy denial the model can relay. WORK: full routing.
-      val routedTool: RoutedIntent? = IntentResolver.route(prompt, currentMode.toPolicyMode())
-      if (routedTool?.tool == "android.browser.embed") {
-        // DUAL VIEW LAW: web requests open the in-app browser pane, never an
-        // external app launch and never a desktop-path hallucination.
-        if (routedTool.args.isNotBlank()) {
-          _dualViewUrl.value = routedTool.args
-          pushLive("opening ${routedTool.args} in Dual View")
-        }
-      } else if (routedTool?.tool == "android.podcast.convene") {
+      val routedTool: RoutedIntent? = IntentResolver.route(executionPrompt, currentMode.toPolicyMode())
+      if (routedTool?.tool == "android.podcast.convene") {
         // COUNCIL PODCAST LAW (work order §17–18): one sentence convenes the
         // live 8-seat episode. Each SpeakerTurn renders as its own chat turn
         // and is queued for multi-voice TTS as it lands. Local-only mutation.
@@ -1678,13 +2216,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         drainQueue()
         return@launch
       } else if (routedTool != null) {
-        _companionState.value =
-          if (currentMode == InteractionMode.WORK) CompanionPetState.TOOL_CALL
-          else CompanionPetState.THINKING
+        _companionState.value = if (currentMode == InteractionMode.WORK)
+          companionStateForTool(routedTool.tool) else CompanionPetState.THINKING
 
         pushLive("tool requested · ${routedTool.tool}")
         emitTurnEvent("tool.requested", liveTurnId, mapOf("tool" to routedTool.tool))
         emitTurnEvent("tool.started", liveTurnId, mapOf("tool" to routedTool.tool))
+        val routedCallId = "call_${UUID.randomUUID().toString().take(8)}"
+        // Live Build Preview Card: ToolStarted
+        toolRuntime.emitWorkEvent(PreviewCardEvent.ToolStarted(
+          sessionId = _activeSessionId.value,
+          workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+          toolName = routedTool.tool,
+          callId = routedCallId
+        ))
         toolRuntime.currentExecutionMode = currentMode.toPolicyMode()
         val toolExec = toolRuntime.executeTool(
           toolName = routedTool.tool,
@@ -1694,6 +2239,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           isHomeOnline = homeReachable
         )
         toolCallsList.add(toolExec.record)
+        // Live Build Preview Card: ToolCompleted / ToolFailed
+        if (toolExec.record.isSuccess) {
+          toolRuntime.emitWorkEvent(PreviewCardEvent.ToolCompleted(
+            sessionId = _activeSessionId.value,
+            workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+            toolName = routedTool.tool,
+            callId = routedCallId,
+            success = true,
+            outputRef = toolExec.record.evidenceHash
+          ))
+        } else {
+          toolRuntime.emitWorkEvent(PreviewCardEvent.ToolFailed(
+            sessionId = _activeSessionId.value,
+            workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+            toolName = routedTool.tool,
+            callId = routedCallId,
+            error = toolExec.record.error ?: "unknown"
+          ))
+        }
         emitTurnEvent(
           if (toolExec.record.isSuccess) "tool.completed" else "tool.failed",
           liveTurnId,
@@ -1710,10 +2274,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
       pushLive(if (currentMode == InteractionMode.WORK) "reasoning with tools" else "composing reply")
 
-      // 4. Call Model Brain — HOME-FIRST LAW: if the canonical runtime is
-      // online, the turn executes THERE (its provider router, steering stack,
-      // event spine). The phone never re-routes or relabels a cloud call as a
-      // Home call.
+      // 4. Call Model Brain — mobile ProviderRouter owns inference. Home is
+      // available only to explicit remote execution/delegation tools.
       _companionState.value = CompanionPetState.REPLYING
 
       // RUNTIME TRUTH: live device state injected into every turn so Purp
@@ -1723,7 +2285,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         context = getApplication(),
         executionMode = currentMode.name,
         homeConnected = homeReachable,
-        inferenceNote = if (homeReachable) "canonical Home PC runtime API" else "on-device provider pool (cloud/local APIs)"
+        inferenceNote = "mobile canonical provider registry (cloud/local APIs)"
       ).let { ctx ->
         toolRuntime.runtimeContextResolver = { ctx }  // same-truth guarantee for system.* tools this turn
         ctx
@@ -1737,7 +2299,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (meshCoordinator.meshStatus.value == MeshStatus.HOME_ONLINE)
           "Home PC: CONNECTED — heavy workloads MAY be delegated."
         else
-          "Home PC: CONNECTED (degraded: some subsystems down) — chat/inference relayed through Home; heavy subsystem workloads may be unavailable."
+          "Home PC: CONNECTED (degraded: some subsystems down) — remote execution workloads may be unavailable."
       } else {
         "Home PC: OFFLINE/UNPAIRED — you are fully autonomous on this device. " +
           "Never reference the Home PC as available, and never route Android-local " +
@@ -1798,7 +2360,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       // supporting the entire parameter set and drowned the model in an
       // irrelevant schema. The registry remains authoritative; expose only
       // the tools this creation intent can actually use.
-      providerRouter.pendingTools = if (ToolIntentBoundary.isArtifactCreationGoal(prompt)) {
+      providerRouter.pendingTools = if (ToolIntentBoundary.isArtifactCreationGoal(executionPrompt)) {
         val creationTools = ToolIntentBoundary.artifactCreationToolNames()
         enabledTools.filter { it.name in creationTools }
       } else {
@@ -1808,9 +2370,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       val receiptBlock = recentReceiptContextBlock()
       val isManualPin = _selectedModel.value != "AUTO" &&
         _selectedModel.value != routeState.selectedModel
-      val wantsHomeRouting = routeState.useHomeRouting &&
-        (currentMode == InteractionMode.WORK || isManualPin)
+      // SOVEREIGNTY LAW (2026-09-09): useHomeRouting is the SOLE gate for HOME routing.
+      // WORK mode must NOT bypass the user's explicit choice — if useHomeRouting is FALSE,
+      // the phone goes DIRECT regardless of mode. The old (WORK || manualPin) clause
+      // violated the comment at 2158a which said HOME routing is "explicit opt-in via
+      // useHomeRouting" — not an implicit WORK-mode override.
+      val wantsHomeRouting = false
       val skipHomeRelay = !homeOnline || !wantsHomeRouting
+      // DEFENSIVE SOVEREIGNTY OVERRIDE: if the user has disabled HOME routing in settings,
+      // force phone-direct. This is a second line of defence in case routeState.useHomeRouting
+      // is stale/wrong due to a StateFlow timing issue.
+      val skipHomeRelayForced = if (!routeState.useHomeRouting) true else skipHomeRelay
       // ALLOW PARTIAL FAILOVER LAW (parity with agent-loop.js:460):
       //   (!provider || provider==='auto') && model ? false : (autoMode || (!provider && !model))
       // On phone: no manual pin + AUTO routing → allowPartialFailover=true (better
@@ -1827,7 +2397,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "${rec.toolName}(${rec.arguments}) → $output"
           } + "\n\n[End of tool results. Use them to answer the user's request.]\n\n"
       } else ""
-      var providerResult: ProviderExecutionResult = if (!skipHomeRelay) {
+      var providerResult: ProviderExecutionResult = if (!skipHomeRelayForced) {
         // WORK SESSION LAW: WORK is the trusted operator gesture. It persists
         // for the whole session — every WORK message carries execution intent
         // plus full-system envelope so nothing lands behind a review gate.
@@ -1835,7 +2405,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           message = buildString {
             if (receiptBlock.isNotEmpty()) append(receiptBlock).append("\n")
             if (toolChainPrefix.isNotEmpty()) append(toolChainPrefix)
-            append(prompt)
+            append(executionPrompt)
           },
           sessionId = _activeSessionId.value,
           mode = currentMode.name,
@@ -1872,7 +2442,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           val localPrompt = buildString {
             if (receiptBlock.isNotEmpty()) append(receiptBlock).append("\n")
             if (toolChainPrefix.isNotEmpty()) append(toolChainPrefix)
-            append(prompt)
+            append(executionPrompt)
           }
           val localModel = resolvePhoneModel()
           attemptedPhoneModel = localModel
@@ -1904,17 +2474,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val composedPrompt = buildString {
           if (receiptBlock.isNotEmpty()) append(receiptBlock).append("\n")
           if (toolChainPrefix.isNotEmpty()) append(toolChainPrefix)
-          append(prompt)
+          append(executionPrompt)
         }
-        val phoneModel = resolvePhoneModel()
+        val phoneModel = _selectedModel.value
         attemptedPhoneModel = phoneModel
         val remoteResult = providerRouter.generateResponse(
           prompt = composedPrompt,
-          preferredProvider = phoneModel ?: "AUTO",
+          preferredProvider = phoneModel,
           systemInstruction = systemPrompt,
           sessionId = _activeSessionId.value,
           toolsRequired = currentMode == InteractionMode.WORK,
-          visionRequired = prompt.contains("camera", ignoreCase = true) || prompt.contains("image", ignoreCase = true),
+          visionRequired = executionPrompt.contains("camera", ignoreCase = true) || executionPrompt.contains("image", ignoreCase = true),
           isHomeOnline = homeOnline,
           conversationHistory = conversationHistory,
           priority = if (currentMode == InteractionMode.CHAT) SharedQuotaLedger.Priority.INTERACTIVE
@@ -1929,7 +2499,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           // Direct call died — escalate to home relay once as a safety net.
           // Stamps HOME in the receipt so the truth in the pill stays accurate.
           val homeChat = HomeRuntimeBridge.chat(
-            message = if (toolChainPrefix.isNotEmpty()) toolChainPrefix + prompt else prompt,
+            message = if (toolChainPrefix.isNotEmpty()) toolChainPrefix + executionPrompt else executionPrompt,
             sessionId = _activeSessionId.value,
             mode = currentMode.name,
             executionIntent = currentMode == InteractionMode.WORK,
@@ -1963,6 +2533,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
       }
 
+      // EXECUTION-NOT-PROMISE LAW: some nominally tool-capable free models
+      // answer creation requests with prose such as "I'll build it" but emit
+      // no structured tool_call. That is not a completed WORK turn. Give the
+      // same route one constrained correction; if it still refuses to call a
+      // tool, surface a typed failure instead of persisting action theatre.
+      val requiresArtifactExecution = currentMode == InteractionMode.WORK &&
+        ToolIntentBoundary.isArtifactCreationGoal(executionPrompt)
+      if (requiresArtifactExecution && providerResult.toolCalls.isEmpty()) {
+        _companionState.value = CompanionPetState.FIXING
+        pushLive("model promised work without a tool · correcting")
+        emitTurnEvent("continuation.started", liveTurnId, mapOf("reason" to "missing_required_tool_call"))
+        val correctionPrompt = buildString {
+          appendLine("[REQUIRED STRUCTURED EXECUTION]")
+          appendLine("turn_id=$liveTurnId")
+          appendLine("Original operator goal: $executionPrompt")
+          appendLine("Your previous response described future work but emitted no structured tool call.")
+          appendLine("Call android.file.write now with a complete HTML artifact. Do not print a tool name and do not promise to act later.")
+          appendLine("After its verified result, continue this same turn with android.artifact.preview, then give the final answer.")
+        }
+        val corrected = providerRouter.generateResponse(
+          prompt = correctionPrompt,
+          preferredProvider = attemptedPhoneModel
+            ?: providerResult.routingReceipt?.resolvedModel
+            ?: "AUTO",
+          systemInstruction = systemPrompt,
+          sessionId = _activeSessionId.value,
+          toolsRequired = true,
+          visionRequired = false,
+          isHomeOnline = false,
+          conversationHistory = conversationHistory,
+          priority = SharedQuotaLedger.Priority.WORK
+        )
+        providerResult = if (corrected.toolCalls.isNotEmpty()) {
+          emitTurnEvent("continuation.completed", liveTurnId, mapOf(
+            "reason" to "missing_required_tool_call",
+            "recovered" to true,
+            "structured_tool_calls" to corrected.toolCalls.size
+          ))
+          corrected
+        } else {
+          emitTurnEvent("continuation.completed", liveTurnId, mapOf(
+            "reason" to "missing_required_tool_call",
+            "recovered" to false
+          ))
+          corrected.copy(
+            content = "",
+            errorMessage = "MODEL_DID_NOT_EMIT_REQUIRED_TOOL_CALL"
+          )
+        }
+      }
+
       // SAME-TURN CONTINUATION LAW. A provider tool_call is intermediate:
       // execute it, inject the verified result, then wake the SAME Soul in
       // the SAME session/turn until it answers, blocks, is cancelled, or
@@ -1988,9 +2609,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           errorText = { it.errorMessage },
           isCancelled = { activeTurnJob?.isActive == false },
           execute = { call ->
+            val steeringDelta = ingestPendingSteering(liveTurnId, force = true)
+            if (steeringDelta != null) {
+              activeSteeringBlock = steeringDelta.contextBlock()
+              if (steeringDelta.cancellations.isNotEmpty()) {
+                throw kotlinx.coroutines.CancellationException("operator_cancelled_by_steering")
+              }
+              // The tool request was planned before the new steering existed.
+              // Reject it without mutation; the same-turn continuation below
+              // receives the delta and must re-plan from the anchored checkpoint.
+              return@run DispatchResult(
+                record = null,
+                receipt = null,
+                error = "Operator steering arrived before execution. Re-plan using the attached SteeringDelta.",
+                errorCode = "STEERING_REPLAN_REQUIRED"
+              )
+            }
+            _companionState.value = companionStateForTool(call.toolName)
             pushLive("tool requested · ${call.toolName}")
             emitTurnEvent("tool.requested", liveTurnId, mapOf("tool" to call.toolName, "call_id" to call.callId))
             emitTurnEvent("tool.started", liveTurnId, mapOf("tool" to call.toolName, "call_id" to call.callId))
+            toolRuntime.emitWorkEvent(PreviewCardEvent.ToolStarted(
+              sessionId = _activeSessionId.value,
+              workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+              toolName = call.toolName,
+              callId = call.callId
+            ))
             pushLive("executing · ${call.toolName}")
             toolRuntime.dispatchCanonical(
               call = call,
@@ -1998,7 +2642,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
               lease = _activeLease.value,
               actorAgent = soul.name,
               isHomeOnline = homeReachable,
-              originalOperatorRequest = prompt
+              originalOperatorRequest = executionPrompt
             ).also { dispatch ->
               emitTurnEvent(
                 if (dispatch.isSuccess) "tool.completed" else "tool.failed",
@@ -2011,7 +2655,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "verified" to dispatch.isSuccess,
                 "evidence_hash" to (dispatch.record?.evidenceHash ?: "")
               ))
+              toolRuntime.emitWorkEvent(
+                if (dispatch.isSuccess) PreviewCardEvent.ToolCompleted(
+                  sessionId = _activeSessionId.value,
+                  workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+                  toolName = call.toolName,
+                  callId = call.callId,
+                  success = true,
+                  outputRef = dispatch.record?.evidenceHash
+                ) else PreviewCardEvent.ToolFailed(
+                  sessionId = _activeSessionId.value,
+                  workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+                  toolName = call.toolName,
+                  callId = call.callId,
+                  error = dispatch.error ?: dispatch.errorCode ?: "unknown tool failure"
+                )
+              )
               dispatch.record?.let(toolCallsList::add)
+              // LESSON TOOL: project lesson card state when a lesson tool lands
+              if (dispatch.isSuccess && dispatch.record != null &&
+                (call.toolName == "lesson.start" || call.toolName == "lesson.action")) {
+                parseLessonCard(dispatch.record.output)?.let { card ->
+                  _activeLessonCard.value = card
+                }
+              }
               dispatch.receipt?.let { receipt ->
                 generatedProof = receipt
                 db.receiptDao().insertReceipt(receipt.toEntity())
@@ -2019,6 +2686,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
           },
           resume = { previous, pairs, step ->
+            ingestPendingSteering(liveTurnId, force = true)?.let { delta ->
+              activeSteeringBlock = delta.contextBlock()
+              if (delta.cancellations.isNotEmpty()) {
+                throw kotlinx.coroutines.CancellationException("operator_cancelled_by_steering")
+              }
+            }
+            _companionState.value = CompanionPetState.REPLYING
             pushLive("continuing after tool step $step")
             emitTurnEvent("continuation.started", liveTurnId, mapOf("step" to step))
             val verifiedResults = pairs.joinToString("\n\n") { (call, dispatch) ->
@@ -2032,10 +2706,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
               appendLine("session_id=${_activeSessionId.value}")
               appendLine("turn_id=$liveTurnId")
               appendLine("soul_id=${soul.name}")
-              appendLine("Original operator request: $prompt")
+              appendLine("Original operator request: $executionPrompt")
               if (previous.content.isNotBlank()) appendLine("Partial assistant text: ${previous.content}")
               appendLine("Verified tool results:")
               appendLine(verifiedResults)
+              if (activeSteeringBlock.isNotBlank()) {
+                appendLine(activeSteeringBlock)
+              }
               appendLine("Continue this same request. Call another provided tool if required; otherwise give the final user-facing answer. Never merely print tool names.")
             }
             val contResult = providerRouter.generateResponse(
@@ -2113,6 +2790,148 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         Log.i("MainViewModel", "Tool continuation ended: ${loopOutcome.termination} steps=${loopOutcome.steps}")
         _toolLoopActive.value = false
+
+        // Companion state after tool loop: SAVED → VERIFYING → SUCCESS/FAILED.
+        // Canonical law: SAVED = file on disk, VERIFIED = artifact openable,
+        // VERIFYING = preview check in flight, SUCCESS = turn dispatch complete.
+        val hasFileWrite = toolCallsList.any { it.toolName == "android.file.write" && it.isSuccess }
+        val hasArtifactPreview = toolCallsList.any { it.toolName == "android.artifact.preview" }
+        val anyFailed = toolCallsList.any { !it.isSuccess }
+        when {
+          hasArtifactPreview -> _companionState.value = CompanionPetState.VERIFYING
+          hasFileWrite -> _companionState.value = CompanionPetState.SAVED
+          anyFailed -> _companionState.value = CompanionPetState.FAILED
+        }
+      }
+
+      // beforeFinalResponse hook: finalization is illegal while steering is
+      // queued. Reconcile and make one same-turn provider continuation. If it
+      // requests tools, preserve the active WorkSession and report a typed
+      // re-plan requirement rather than falsely completing stale work.
+      var steeringBlockReason: String? = null
+      ingestPendingSteering(liveTurnId, force = true)?.let { finalDelta ->
+        if (finalDelta.cancellations.isNotEmpty()) {
+          throw kotlinx.coroutines.CancellationException("operator_cancelled_by_steering")
+        }
+        activeSteeringBlock = finalDelta.contextBlock()
+        emitTurnEvent("continuation.started", liveTurnId, mapOf("reason" to "steering_before_final"))
+        val steered = providerRouter.generateResponse(
+          prompt = buildString {
+            appendLine("[SAME TURN STEERING CONTINUATION]")
+            appendLine("session_id=${_activeSessionId.value}")
+            appendLine("turn_id=$liveTurnId")
+            appendLine("Original operator request: $executionPrompt")
+            if (providerResult.content.isNotBlank()) appendLine("Draft response: ${providerResult.content}")
+            appendLine(activeSteeringBlock)
+            appendLine("Apply every steering message. Use structured tools for remaining work; otherwise return the corrected final answer.")
+          },
+          preferredProvider = providerResult.routingReceipt?.resolvedModel ?: providerResult.providerModel,
+          systemInstruction = systemPrompt,
+          sessionId = _activeSessionId.value,
+          toolsRequired = currentMode == InteractionMode.WORK,
+          visionRequired = false,
+          isHomeOnline = false,
+          conversationHistory = conversationHistory,
+          priority = SharedQuotaLedger.Priority.WORK
+        )
+        providerResult = if (steered.toolCalls.isEmpty()) steered else {
+          _toolLoopActive.value = true
+          val lateTurnJob = currentCoroutineContext()[Job]
+          val lateOutcome = BoundedToolContinuation.run(
+            initial = steered,
+            maxSteps = 6,
+            calls = { it.toolCalls },
+            finalText = { it.content },
+            errorText = { it.errorMessage },
+            isCancelled = { lateTurnJob?.isActive == false },
+            execute = { call ->
+              pushLive("executing steered action · ${call.toolName}")
+              emitTurnEvent("tool.started", liveTurnId, mapOf("tool" to call.toolName, "call_id" to call.callId))
+              toolRuntime.emitWorkEvent(PreviewCardEvent.ToolStarted(
+                sessionId = _activeSessionId.value,
+                workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+                toolName = call.toolName,
+                callId = call.callId
+              ))
+              toolRuntime.dispatchCanonical(
+                call = call,
+                mode = currentMode,
+                lease = _activeLease.value,
+                actorAgent = soul.name,
+                isHomeOnline = homeReachable,
+                originalOperatorRequest = executionPrompt
+              ).also { dispatch ->
+                dispatch.record?.let(toolCallsList::add)
+                dispatch.receipt?.let { receipt ->
+                  generatedProof = receipt
+                  db.receiptDao().insertReceipt(receipt.toEntity())
+                }
+                toolRuntime.emitWorkEvent(
+                  if (dispatch.isSuccess) PreviewCardEvent.ToolCompleted(
+                    sessionId = _activeSessionId.value,
+                    workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+                    toolName = call.toolName,
+                    callId = call.callId,
+                    success = true,
+                    outputRef = dispatch.record?.evidenceHash
+                  ) else PreviewCardEvent.ToolFailed(
+                    sessionId = _activeSessionId.value,
+                    workSessionId = activeWorkServiceTurnId ?: liveTurnId,
+                    toolName = call.toolName,
+                    callId = call.callId,
+                    error = dispatch.error ?: dispatch.errorCode ?: "unknown tool failure"
+                  )
+                )
+              }
+            },
+            resume = { previous, pairs, step ->
+              pushLive("continuing steered work after step $step")
+              val observations = pairs.joinToString("\n\n") { (call, dispatch) ->
+                "tool_call_id=${call.callId}\n${call.toolName} → ${dispatch.record?.output ?: dispatch.error ?: "tool failed"}"
+              }
+              providerRouter.generateResponse(
+                prompt = buildString {
+                  appendLine("[SAME TURN STEERING TOOL CONTINUATION]")
+                  appendLine("turn_id=$liveTurnId")
+                  appendLine("Original operator request: $executionPrompt")
+                  appendLine(activeSteeringBlock)
+                  if (previous.content.isNotBlank()) appendLine("Partial response: ${previous.content}")
+                  appendLine("Verified observations:\n$observations")
+                  appendLine("Continue with structured tools if required, otherwise return the final answer.")
+                },
+                preferredProvider = previous.providerModel,
+                systemInstruction = systemPrompt,
+                sessionId = _activeSessionId.value,
+                toolsRequired = true,
+                visionRequired = false,
+                isHomeOnline = false,
+                conversationHistory = conversationHistory,
+                priority = SharedQuotaLedger.Priority.WORK
+              )
+            }
+          )
+          _toolLoopActive.value = false
+          if (lateOutcome.termination == ToolLoopTermination.FINAL_RESPONSE) {
+            lateOutcome.message
+          } else {
+            steeringBlockReason = "Steered continuation stopped at ${lateOutcome.termination} after ${lateOutcome.steps} tool steps."
+            lateOutcome.message.copy(
+              content = lateOutcome.message.content.ifBlank { steeringBlockReason.orEmpty() },
+              errorMessage = "STEERING_CONTINUATION_${lateOutcome.termination.name}"
+            )
+          }
+        }
+        emitTurnEvent("continuation.completed", liveTurnId, mapOf(
+          "reason" to "steering_before_final",
+          "next_tool_calls" to steered.toolCalls.size
+        ))
+        if (steeringBlockReason == null) {
+          steeringContinuity.acknowledgeAndClose()
+          emitTurnEvent("steering.acknowledged", liveTurnId, mapOf(
+            "messages_ingested" to finalDelta.messagesIngested,
+            "plan_revision" to finalDelta.planRevisionAfter
+          ))
+        }
       }
 
       // HOME-FAILOVER LAW: when the canonical runtime never served this turn
@@ -2127,7 +2946,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       val phoneResultUsable = providerResult.content.isNotBlank() &&
         providerResult.errorMessage == null &&
         providerResult.routingReceipt?.qualityGateResult != "EMERGENCY_FALLBACK"
-      if (!homeServedThisTurn && !phoneResultUsable && (!homeReachable || !wantsHomeRouting)) {
+      if (steeringBlockReason == null && !homeServedThisTurn && !phoneResultUsable && (!homeReachable || !wantsHomeRouting)) {
+        _companionState.value = CompanionPetState.RETRY
         pushLive("home offline — trying mobile provider")
         // Prefer the operator's pin; otherwise walk the live free-gateway
         // catalogue. NIM is first because its frontier-model pool is the
@@ -2140,7 +2960,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val composedPrompt = buildString {
           if (receiptBlock.isNotEmpty()) append(receiptBlock).append("\n")
           if (toolChainPrefix.isNotEmpty()) append(toolChainPrefix)
-          append(prompt)
+          append(executionPrompt)
         }
         var rescueSucceeded = false
         repeat(4) {
@@ -2154,7 +2974,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             systemInstruction = systemPrompt,
             sessionId = _activeSessionId.value,
             toolsRequired = currentMode == InteractionMode.WORK,
-            visionRequired = prompt.contains("camera", ignoreCase = true) || prompt.contains("image", ignoreCase = true),
+            visionRequired = executionPrompt.contains("camera", ignoreCase = true) || executionPrompt.contains("image", ignoreCase = true),
             isHomeOnline = false,
             conversationHistory = conversationHistory,
             priority = if (currentMode == InteractionMode.CHAT) SharedQuotaLedger.Priority.INTERACTIVE
@@ -2178,10 +2998,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           }
         }
         if (!rescueSucceeded) {
+          _companionState.value = CompanionPetState.FAILED
           truthfulErrorCard = "No response received · Retry"
           providerResult = providerResult.copy(content = "")
           Log.w("MainViewModel", "Phone failover exhausted: ${attemptedModels.joinToString(" → ")}")
         }
+      }
+
+      // Final fraud gate. A creation request with no executed file mutation
+      // cannot be completed by persuasive prose from a later fallback route.
+      if (requiresArtifactExecution && toolCallsList.none { it.toolName == "android.file.write" }) {
+        truthfulErrorCard = "I couldn't start the artifact build because the selected models did not emit the required structured file tool call. AUTO exhausted this attempt without pretending the site was built. · MODEL_DID_NOT_EMIT_REQUIRED_TOOL_CALL"
+        providerResult = providerResult.copy(
+          content = "",
+          errorMessage = "MODEL_DID_NOT_EMIT_REQUIRED_TOOL_CALL"
+        )
       }
 
       // A cancelled/superseded blocking provider callback may still return.
@@ -2258,8 +3089,73 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       )
 
       db.turnDao().insertTurn(assistantTurn.toEntity())
+      val artifactVerified = toolCallsList.any { it.toolName == "android.file.write" && it.isSuccess } &&
+        toolCallsList.any { it.toolName == "android.artifact.preview" && it.isSuccess }
+      if (artifactVerified && !assistantTurn.content.startsWith("No response received")) {
+        prefs.edit().remove("active_work_objective").apply()
+      }
+      val finishingWorkId = activeWorkServiceTurnId?.takeIf { currentMode == InteractionMode.WORK && it == liveTurnId }
+      if (finishingWorkId != null) {
+        // FINALIZER GATE LAW (2026-09-02): VerificationPassed had zero emitters,
+        // so a card could strand mid-lifecycle (stuck OBSERVING/VERIFYING at
+        // "6/7 verified") forever after the turn ended. Emit the real check
+        // results here — derived only from executed receipts, never optimism —
+        // then the terminal event. The card can never outlive its turn now.
+        val verifyChecksPassed = buildList {
+          if (toolCallsList.any { it.toolName == "android.file.write" && it.isSuccess }) add("ARTIFACT_WRITTEN")
+          if (toolCallsList.any { it.toolName == "android.artifact.preview" && it.isSuccess }) add("ARTIFACT_PREVIEW_VERIFIED")
+          if (generatedProof != null) add("RECEIPT_SIGNED")
+          if (assistantTurn.content.isNotBlank() && !assistantTurn.content.startsWith("No response received")) add("RESPONSE_DELIVERED")
+        }
+        val verifyChecksFailed = toolCallsList.filter { !it.isSuccess }.map { "TOOL_FAILED:${it.toolName}" }
+        toolRuntime.emitWorkEvent(PreviewCardEvent.VerificationStarted(
+          sessionId = _activeSessionId.value,
+          workSessionId = finishingWorkId,
+          checks = verifyChecksPassed + verifyChecksFailed
+        ))
+        if (verifyChecksPassed.contains("RESPONSE_DELIVERED")) {
+          // Failed tool receipts stay visible in the card's per-call ledger;
+          // verification passes on what actually held, not on hiding failures.
+          toolRuntime.emitWorkEvent(PreviewCardEvent.VerificationPassed(
+            sessionId = _activeSessionId.value,
+            workSessionId = finishingWorkId,
+            checksPassed = verifyChecksPassed
+          ))
+        } else {
+          toolRuntime.emitWorkEvent(PreviewCardEvent.VerificationFailed(
+            sessionId = _activeSessionId.value,
+            workSessionId = finishingWorkId,
+            failedChecks = verifyChecksFailed.ifEmpty { listOf("NO_RESPONSE_DELIVERED") }
+          ))
+        }
+        if (assistantTurn.content.startsWith("No response received") || steeringBlockReason != null) {
+          WorkSessionForegroundService.blocked(getApplication(), assistantTurn.content)
+          toolRuntime.emitWorkEvent(PreviewCardEvent.WorkBlocked(
+            sessionId = _activeSessionId.value,
+            workSessionId = finishingWorkId,
+            reason = assistantTurn.content
+          ))
+        } else {
+          WorkSessionForegroundService.complete(
+            getApplication(),
+            assistantTurn.content.take(180),
+            _dualViewUrl.value
+          )
+          toolRuntime.emitWorkEvent(PreviewCardEvent.WorkCompleted(
+            sessionId = _activeSessionId.value,
+            workSessionId = finishingWorkId,
+            finalVersion = generatedProof?.completedAt?.toString() ?: "turn-$liveTurnId",
+            artifactId = generatedProof?.receiptId ?: "turn:$liveTurnId",
+            artifactPath = _dualViewUrl.value.orEmpty(),
+            totalSteps = toolCallsList.size,
+            fileCount = toolCallsList.count { it.toolName == "android.file.write" && it.isSuccess },
+            totalBytes = 0
+          ))
+        }
+        activeWorkServiceTurnId = null
+      }
       emitTurnEvent(
-        if (assistantTurn.content.startsWith("No response received")) "turn.blocked" else "turn.final",
+        if (assistantTurn.content.startsWith("No response received") || steeringBlockReason != null) "turn.blocked" else "turn.final",
         liveTurnId,
         mapOf("tool_count" to toolCallsList.size, "provider_model" to providerResult.providerModel)
       )
@@ -2274,18 +3170,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       )
 
       // 7. VOICE LOOP: voice in -> voice out. Also explicit "speak" requests.
+      // SPEAKING is set here for non-voice-mode "speak" triggers; voice-mode SPEAKING
+      // is handled by the VoiceModeController collector that mirrors VoiceMode.SPEAKING
+      // into CompanionPetState.SPEAKING via the isSpeaking StateFlow.
       if (lastTurnWasVoice || voiceModeController.wantsVoiceOut() ||
           prompt.contains("speak", ignoreCase = true) || prompt.contains("read that", ignoreCase = true)) {
+        _companionState.value = CompanionPetState.SPEAKING
         ttsEngine.speak(stripToolCallBlocksFromReply(assistantTurn.content))
         lastTurnWasVoice = false
       }
 
-      _companionState.value = CompanionPetState.SUCCESS
+      _companionState.value = if (artifactVerified) CompanionPetState.VERIFIED else CompanionPetState.SUCCESS
       activeTurnToken = null
       activeTurnId = null
       _isGenerating.value = false
 
-      delay(1200)
+      delay(if (artifactVerified) 2000 else 1200)
       _companionState.value = CompanionPetState.IDLE
       // QUEUE: next queued message processes immediately
       drainQueue()
@@ -2298,6 +3198,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeTurnId = null
         if (id != null && cause !is kotlinx.coroutines.CancellationException) {
           emitTurnEvent("turn.blocked", id, mapOf("failure" to (cause.message ?: cause.javaClass.simpleName)))
+          if (activeWorkServiceTurnId == id) {
+            WorkSessionForegroundService.blocked(
+              getApplication(),
+              cause.message ?: cause.javaClass.simpleName
+            )
+            toolRuntime.emitWorkEvent(PreviewCardEvent.WorkFailed(
+              sessionId = _activeSessionId.value,
+              workSessionId = id,
+              reason = cause.message ?: cause.javaClass.simpleName
+            ))
+            activeWorkServiceTurnId = null
+          }
         }
         _liveTurn.value = null
         _isGenerating.value = false
@@ -2305,6 +3217,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       }
       if (activeTurnJob == launchedJob) activeTurnJob = null
     }
+  }
+
+  /**
+   * Structured tool identity → visible companion action. This consumes the
+   * canonical tool name, not prose/keywords from a model reply, so the pet
+   * can never randomly animate because a sentence happened to contain
+   * "search" or "write".
+   */
+  private fun companionStateForTool(toolName: String): CompanionPetState = when {
+    toolName == "android.file.write" || toolName.startsWith("artifact.create") -> CompanionPetState.WRITING
+    toolName.startsWith("android.browser.search") || toolName.startsWith("web.search") -> CompanionPetState.SEARCHING
+    toolName.startsWith("code.") || toolName.startsWith("android.artifact.build") -> CompanionPetState.CODING
+    toolName.startsWith("system.") || toolName.endsWith(".inspect") || toolName.endsWith(".list") -> CompanionPetState.SEARCHING
+    toolName.startsWith("android.file.") -> CompanionPetState.TOOL_CALL
+    else -> CompanionPetState.TOOL_CALL
   }
 
   /** Canonical voice loop owner. Mic tap = toggle (OFF<->LISTENING, barge-in while SPEAKING). */
@@ -2344,6 +3271,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       if (_isPodcastActive.value && transcript.isNotBlank()) {
         val id = getOrCreatePodcastEngine().enqueueGuest(transcript)
         Log.i("MainViewModel", "guest queued ($id) depth=${getOrCreatePodcastEngine().guestQueue.value.size}")
+        _inputText.value = ""
+        lastTurnWasVoice = false
+        return@onTranscript
+      }
+      // LESSON TOOL: an active lesson captures the mic as the step answer.
+      // Spoken text is matched to a choice id for MULTIPLE_CHOICE (speaking
+      // a raw id like "c" is unnatural); FREE_TEXT/CHECKPOINT take the
+      // transcript verbatim. Unmatched choice speech falls through to the
+      // engine, which answers with honest wrong-answer feedback.
+      val lessonCard = _activeLessonCard.value
+      if (lessonCard != null && transcript.isNotBlank() &&
+        lessonCard.step.kind in setOf("MULTIPLE_CHOICE", "FREE_TEXT", "CHECKPOINT")
+      ) {
+        val answer = if (lessonCard.step.kind == "MULTIPLE_CHOICE") {
+          val spoken = transcript.trim()
+          lessonCard.step.choices.firstOrNull { choice ->
+            choice.label.contains(spoken, ignoreCase = true) || spoken.contains(choice.label, ignoreCase = true)
+          }?.id ?: spoken
+        } else transcript.trim()
+        onLessonAction(com.example.core.runtime.lesson.LessonAction(
+          lessonId = lessonCard.lessonId,
+          stepId = lessonCard.step.stepId,
+          workSessionId = lessonCard.workSessionId,
+          type = com.example.core.runtime.lesson.LessonActionType.ANSWER,
+          answer = answer
+        ))
         _inputText.value = ""
         lastTurnWasVoice = false
         return@onTranscript
@@ -2419,6 +3372,157 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
+  // ── TASK #104: Plus Action Sheet attachment pipeline (SAF / photo picker) ──
+
+  private fun safDisplayName(uri: android.net.Uri): String? = runCatching {
+    val app = getApplication<Application>()
+    app.contentResolver.query(uri, null, null, null, null)?.use { c ->
+      val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+      if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+    }
+  }.getOrNull()
+
+  private fun sha256Of(input: java.io.InputStream): String {
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    val buf = ByteArray(64 * 1024)
+    while (true) {
+      val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n)
+    }
+    return md.digest().joinToString("") { "%02x".format(it) }
+  }
+
+  /** SAF file attach: materialize ≤64MB into intake/, hash, register chip. */
+  fun attachSafDocument(uri: android.net.Uri) {
+    viewModelScope.launch(Dispatchers.IO) {
+      val app = getApplication<Application>()
+      val name = safDisplayName(uri) ?: "document"
+      val mime = app.contentResolver.getType(uri)
+      val size = runCatching {
+        app.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+      }.getOrDefault(-1L)
+      if (size <= 0L) {
+        withContext(Dispatchers.Main) {
+          _inputText.value = "Attachment '$name' unreadable (empty or revoked grant). Nothing attached."
+        }
+        return@launch
+      }
+      val intakeDir = java.io.File(app.filesDir, "intake").apply { mkdirs() }
+      val safeName = name.replace(Regex("[^A-Za-z0-9._ -]"), "_").takeLast(80)
+      val dest = java.io.File(intakeDir, safeName)
+      val copied = size <= 64L * 1024 * 1024 && runCatching {
+        app.contentResolver.openInputStream(uri)?.use { ins ->
+          dest.outputStream().use { ins.copyTo(it) }
+        } != null
+      }.getOrDefault(false)
+      val digest = runCatching {
+        app.contentResolver.openInputStream(uri)?.use { sha256Of(it) }
+      }.getOrNull()
+      val kind = when {
+        mime?.startsWith("image/") == true -> MediaKind.IMAGE
+        mime?.startsWith("video/") == true -> MediaKind.VIDEO
+        else -> MediaKind.FILE
+      }
+      val attachment = MediaAttachment(
+        kind = kind,
+        uri = uri.toString(),
+        mime = mime,
+        label = safeName,
+        resourceUri = if (copied) "purpclaw://intake/${dest.name}" else null,
+        sha256 = digest,
+        sizeBytes = size,
+        source = if (copied) "SAF_FILE_MATERIALIZED" else "SAF_FILE_GRANT"
+      )
+      withContext(Dispatchers.Main) {
+        _pendingMediaAttachments.value = _pendingMediaAttachments.value + attachment
+        _lastPlusAction.value = "Attached $safeName (${size / 1024} KB${if (digest != null) ", sha256 ok" else ""})"
+      }
+    }
+  }
+
+  /** SAF folder attach: scoped tree grant only — never a broadened read. */
+  fun attachSafFolder(uri: android.net.Uri) {
+    viewModelScope.launch(Dispatchers.IO) {
+      val label = runCatching {
+        android.provider.DocumentsContract.getTreeDocumentId(uri)
+          ?.substringAfterLast('/')?.ifBlank { null } ?: "folder"
+      }.getOrDefault("folder")
+      val attachment = MediaAttachment(
+        kind = MediaKind.FILE,
+        uri = uri.toString(),
+        mime = android.provider.DocumentsContract.Document.MIME_TYPE_DIR,
+        label = label,
+        source = "SAF_FOLDER_SCOPED"
+      )
+      withContext(Dispatchers.Main) {
+        _pendingMediaAttachments.value = _pendingMediaAttachments.value + attachment
+        _lastPlusAction.value = "Folder scoped: $label (tree grant persisted, no broadened access)"
+      }
+    }
+  }
+
+  /** Photo-picker attach: copy into chat-images/ (picker grants are transient). */
+  fun attachGalleryMedia(uri: android.net.Uri) {
+    viewModelScope.launch(Dispatchers.IO) {
+      val app = getApplication<Application>()
+      val mime = app.contentResolver.getType(uri) ?: "image/*"
+      val name = safDisplayName(uri) ?: "gallery_media"
+      val digest = runCatching {
+        app.contentResolver.openInputStream(uri)?.use { sha256Of(it) }
+      }.getOrNull()
+      val safeName = ("gallery_" + name.replace(Regex("[^A-Za-z0-9._ -]"), "_").takeLast(60))
+      val dir = java.io.File(app.filesDir, "chat-images").apply { mkdirs() }
+      val dest = java.io.File(dir, safeName)
+      val copied = runCatching {
+        app.contentResolver.openInputStream(uri)?.use { ins -> dest.outputStream().use { ins.copyTo(it) } } != null
+      }.getOrDefault(false)
+      if (!copied || dest.length() <= 0L) {
+        withContext(Dispatchers.Main) {
+          _inputText.value = "Gallery pick could not be materialized. Nothing attached."
+        }
+        return@launch
+      }
+      val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      android.graphics.BitmapFactory.decodeFile(dest.absolutePath, bounds)
+      val kind = if (mime.startsWith("video/")) MediaKind.VIDEO else MediaKind.IMAGE
+      val attachment = MediaAttachment(
+        kind = kind,
+        uri = dest.toURI().toString(),
+        mime = mime,
+        label = safeName,
+        resourceUri = "purpclaw://chat-images/${dest.name}",
+        sha256 = digest ?: CameraVisionEngine.computeFileSha256(dest),
+        sizeBytes = dest.length(),
+        width = bounds.outWidth.takeIf { it > 0 },
+        height = bounds.outHeight.takeIf { it > 0 },
+        source = "PHOTO_PICKER"
+      )
+      withContext(Dispatchers.Main) {
+        _pendingMediaAttachments.value = _pendingMediaAttachments.value + attachment
+        _lastPlusAction.value = "Attached $safeName (${dest.length() / 1024} KB)"
+      }
+    }
+  }
+
+  fun removePendingAttachment(index: Int) {
+    val current = _pendingMediaAttachments.value.toMutableList()
+    if (index in current.indices) {
+      current.removeAt(index)
+      _pendingMediaAttachments.value = current
+    }
+  }
+
+  /** Context injection for URL / clipboard / agent mentions (visible + editable). */
+  fun appendComposerContext(line: String) {
+    val cur = _inputText.value
+    _inputText.value = if (cur.isBlank()) line else cur + "\n" + line
+  }
+
+  fun consumeLastPlusAction(): String? {
+    val v = _lastPlusAction.value
+    _lastPlusAction.value = null
+    return v
+  }
+
   fun triggerFileIntakeCapsule(name: String = "purpclaw_project_workspace.zip") {
     viewModelScope.launch {
       _companionState.value = CompanionPetState.TOOL_CALL
@@ -2447,8 +3551,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           it == MeshStatus.HOME_ONLINE || it == MeshStatus.HYBRID_DEGRADED
         }
       )
-      result.proofReceipt?.let {
-        db.receiptDao().insertReceipt(it.toEntity())
+      // ToolRuntimeEngine is the canonical terminal finalizer. Do not perform
+      // a second receipt write here or conceal its explicit audit failure.
+      if (result.auditOutcome == "FAILED") {
+        Log.e("MainViewModel", "Direct tool completed with ${result.overallTruth}")
       }
     }
   }
@@ -2487,6 +3593,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     addVaultSecret("OPENROUTER_API_KEY", key, "OpenRouter API Key")
     viewModelScope.launch {
       providerRouter.refreshOpenRouterCatalogue()
+      refreshCanonicalRouteRegistry("OPENROUTER_CATALOGUE_CHANGED")
     }
   }
 
@@ -2496,6 +3603,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch {
       providerRouter.checkMiniMaxInstalledCapabilities()
       providerRouter.refreshMinimaxCatalogue()
+      refreshCanonicalRouteRegistry("MINIMAX_CATALOGUE_CHANGED")
     }
   }
 
@@ -2504,6 +3612,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     addVaultSecret("NVIDIA_NIM_API_KEY", key, "NVIDIA NIM API Key")
     viewModelScope.launch {
       providerRouter.refreshNimCatalogue()
+      refreshCanonicalRouteRegistry("NIM_CATALOGUE_CHANGED")
     }
   }
 
@@ -2519,7 +3628,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         "OPENAI_API_KEY" -> providerRouter.refreshOpenaiCatalogue()
         "ZAI_API_KEY" -> providerRouter.refreshZaiCatalogue()
         "LONGCAT_API_KEY" -> providerRouter.refreshLongcatCatalogue()
+        "GROQ_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.GROQ)
+        "CEREBRAS_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.CEREBRAS)
+        "GOOGLE_AI_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.GOOGLE_AI)
+        "CLOUDFLARE_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.CLOUDFLARE)
+        // Account id alone can complete the Cloudflare lane (key already set),
+        // so a save here also re-attempts the catalogue fetch.
+        "CLOUDFLARE_ACCOUNT_ID" -> providerRouter.refreshGatewayCatalogue(ProviderSource.CLOUDFLARE)
       }
+      refreshCanonicalRouteRegistry("DIRECT_PROVIDER_CATALOGUE_CHANGED")
     }
   }
 
@@ -2540,7 +3657,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         "OPENAI_API_KEY" -> providerRouter.refreshOpenaiCatalogue()
         "ZAI_API_KEY" -> providerRouter.refreshZaiCatalogue()
         "LONGCAT_API_KEY" -> providerRouter.refreshLongcatCatalogue()
+        "GROQ_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.GROQ)
+        "CEREBRAS_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.CEREBRAS)
+        "GOOGLE_AI_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.GOOGLE_AI)
+        "CLOUDFLARE_API_KEY" -> providerRouter.refreshGatewayCatalogue(ProviderSource.CLOUDFLARE)
+        "CLOUDFLARE_ACCOUNT_ID" -> providerRouter.refreshGatewayCatalogue(ProviderSource.CLOUDFLARE)
       }
+      refreshCanonicalRouteRegistry("VAULT_SECRET_CLEARED")
     }
   }
 
@@ -2584,6 +3707,13 @@ All capabilities are backed by real Android APIs, hardware Keystore signing, 7-l
     super.onCleared()
   }
 }
+
+internal fun receiptPromptState(verificationStatus: String): String =
+  when (verificationStatus.uppercase()) {
+    "VERIFIED" -> "VERIFIED_PASS"
+    "FAILED" -> "EXECUTION_FAILED"
+    else -> "COMPLETED_UNVERIFIED"
+  }
 
 // --- Mapping Extensions ---
 
@@ -2732,6 +3862,16 @@ private fun deterministicToolAcknowledgement(
     record.toolName == "android.app.open" && verified -> "Opened the app on this phone. ✓"
     record.toolName == "android.camera.capture" -> "Captured a photo on this phone. ✓"
     record.toolName == "android.app.list" -> "I checked the apps installed on this phone. ✓"
+    record.toolName == "android.file.search" -> "I searched the phone workspace. ✓"
+    record.toolName == "android.file.read" -> "I read the requested phone-local file. ✓"
+    record.toolName.startsWith("system.") -> "I read the requested live runtime state. ✓"
+    record.toolName in setOf(
+      "android.device.info",
+      "android.battery.status",
+      "android.network.status",
+      "android.storage.status",
+      "android.clipboard.read"
+    ) -> "I read the requested phone state. ✓"
     verified -> "Completed and verified the action on this phone. ✓"
     else -> "Action sent to Android, but I couldn't verify the resulting screen."
   }
@@ -2762,4 +3902,284 @@ private fun ProofReceipt.toEntity(): com.example.core.database.ProofReceiptEntit
     signingKeyId = signingKeyId,
     signature = signature
   )
+}
+
+// ── Live Build Preview Card event reducer ─────────────────────────────────
+// Pure function: PreviewCardEvent → LiveBuildCardState
+// Law: never invents progress; reflects canonical WorkSession + artifact truth.
+internal fun reduceCardEvent(
+  current: LiveBuildCardState?,
+  event: PreviewCardEvent
+): LiveBuildCardState? {
+  // Bootstrapping: first event must be WorkStarted
+  if (current == null) {
+    if (event !is PreviewCardEvent.WorkStarted) return LiveBuildCardState.EMPTY
+    return LiveBuildCardState(
+      workSessionId = event.workSessionId,
+      sessionId = event.sessionId,
+      objective = event.objective,
+      status = WorkSession.Status.PLANNING,
+      totalSteps = event.totalSteps,
+      currentStep = event.currentStep,
+      currentStepLabel = event.currentStepLabel,
+      isLive = true,
+      updatedAtMs = event.timestampMs
+    )
+  }
+
+  // Ignore events for a different WorkSession
+  if (event.workSessionId != current.workSessionId) return current
+
+  return when (event) {
+
+    is PreviewCardEvent.WorkStarted -> current.copy(
+      workSessionId = event.workSessionId,
+      sessionId = event.sessionId,
+      objective = event.objective,
+      status = WorkSession.Status.PLANNING,
+      totalSteps = event.totalSteps,
+      currentStep = event.currentStep,
+      currentStepLabel = event.currentStepLabel,
+      isLive = true,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.WorkPlanUpdated -> current.copy(
+      status = WorkSession.Status.PLANNING,
+      totalSteps = event.totalSteps,
+      steps = event.steps.mapIndexed { idx, label ->
+        StepState(index = idx, label = label, isPending = idx >= current.currentStep)
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.WorkPhaseChanged -> current.copy(
+      status = event.status,
+      currentStepLabel = event.label,
+      isLive = true,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.StepStarted -> current.copy(
+      status = WorkSession.Status.EXECUTING,
+      currentStep = event.stepIndex,
+      currentStepLabel = event.stepLabel,
+      steps = current.steps.mapIndexed { idx, step ->
+        if (idx == event.stepIndex) step.copy(isCurrent = true, isPending = false)
+        else step
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.StepProgress -> current.copy(
+      currentStepLabel = event.message,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.StepCompleted -> current.copy(
+      currentStep = event.stepIndex + 1,
+      currentStepLabel = "",
+      status = if (event.stepIndex + 1 >= current.totalSteps && current.totalSteps > 0)
+        WorkSession.Status.VERIFYING else current.status,
+      steps = current.steps.mapIndexed { idx, step ->
+        if (idx == event.stepIndex) step.copy(isDone = true, isCurrent = false)
+        else step
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.StepFailed -> current.copy(
+      status = WorkSession.Status.TERMINAL_FAILURE,
+      error = event.error,
+      steps = current.steps.mapIndexed { idx, step ->
+        if (idx == event.stepIndex) step.copy(isFailed = true, isCurrent = false)
+        else step
+      },
+      isLive = false,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.BuildStarted -> current.copy(
+      status = WorkSession.Status.BUILDING,
+      currentVersion = event.version,
+      artifactId = event.artifactId,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.BuildProgress -> current.copy(
+      currentVersion = event.version,
+      currentStepLabel = event.message,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.BuildCompleted -> current.copy(
+      status = WorkSession.Status.PREVIEW_AVAILABLE,
+      artifactId = event.artifactId,
+      artifactPath = event.artifactPath,
+      fileCount = event.fileCount,
+      totalBytes = event.totalBytes,
+      lastVerifiedVersion = event.version,
+      lastVerifiedArtifactId = event.artifactId,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.BuildFailed -> current.copy(
+      status = WorkSession.Status.RECOVERING,
+      error = event.error,
+      lastVerifiedVersion = event.lastVerifiedVersion ?: current.lastVerifiedVersion,
+      lastVerifiedArtifactId = event.lastVerifiedArtifactId ?: current.lastVerifiedArtifactId,
+      isLive = event.lastVerifiedVersion != null,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ArtifactCreated -> current.copy(
+      artifactId = event.artifactId,
+      artifactPath = event.artifactPath,
+      currentVersion = event.version,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ArtifactUpdated -> current.copy(
+      artifactId = event.artifactId,
+      artifactPath = event.artifactPath,
+      currentVersion = event.version,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ArtifactVerified -> current.copy(
+      lastVerifiedVersion = event.version,
+      lastVerifiedArtifactId = event.artifactId,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.PreviewStarted -> current.copy(
+      status = WorkSession.Status.PREVIEW_AVAILABLE,
+      artifactId = event.artifactId,
+      isLive = true,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.PreviewUpdated -> current.copy(
+      screenshotUri = event.screenshotUri,
+      artifactId = event.artifactId,
+      currentVersion = event.version,
+      isLive = true,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.PreviewFailed -> current.copy(
+      error = event.reason,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.VerificationStarted -> current.copy(
+      status = WorkSession.Status.VERIFYING,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.IssueFound -> current.copy(
+      status = WorkSession.Status.REWORKING,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.VerificationPassed -> current.copy(
+      status = WorkSession.Status.FINALIZING,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.VerificationFailed -> current.copy(
+      status = WorkSession.Status.REWORKING,
+      error = "Verification failed: ${event.failedChecks.joinToString(", ")}",
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.WorkReworkStarted -> current.copy(
+      status = WorkSession.Status.REWORKING,
+      isLive = true,
+      updatedAtMs = event.timestampMs
+    )
+
+    // Terminal events: clear the card so it stops covering the screen.
+    // The card is a live-work indicator, not a historical receipt — once the
+    // work is done/failed/cancelled, hide it immediately. If the user wants to
+    // see the final artifact they use the Open button before sending the next message.
+    is PreviewCardEvent.WorkCompleted -> null
+    is PreviewCardEvent.WorkFailed -> null
+    is PreviewCardEvent.WorkCancelled -> null
+
+    is PreviewCardEvent.WorkBlocked -> current.copy(
+      status = WorkSession.Status.BLOCKED_NEEDS_USER,
+      isLive = false,
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.AgentSpawned -> current.copy(
+      agentChildren = current.agentChildren + AgentChildState(
+        name = event.agentName,
+        role = event.role,
+        status = AgentChildState.Status.RUNNING
+      ),
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.AgentProgress -> current.copy(
+      agentChildren = current.agentChildren.map { child ->
+        if (child.name == event.agentName) child.copy(
+          status = AgentChildState.Status.RUNNING,
+          message = event.message
+        ) else child
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.AgentCompleted -> current.copy(
+      agentChildren = current.agentChildren.map { child ->
+        if (child.name == event.agentName) child.copy(status = AgentChildState.Status.DONE)
+        else child
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ToolStarted -> current.copy(
+      status = WorkSession.Status.EXECUTING,
+      currentStepLabel = "running ${event.toolName}",
+      toolReceipts = current.toolReceipts + com.example.ui.model.ToolReceiptState(
+        callId = event.callId,
+        toolName = event.toolName,
+        status = com.example.ui.model.ToolReceiptState.Status.RUNNING
+      ),
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ToolCompleted -> current.copy(
+      status = WorkSession.Status.OBSERVING,
+      currentStepLabel = if (event.success) "${event.toolName} ✓" else "${event.toolName} ✗",
+      toolReceipts = current.toolReceipts.map { trace ->
+        if (trace.callId == event.callId) trace.copy(
+          status = if (event.success) com.example.ui.model.ToolReceiptState.Status.VERIFIED
+            else com.example.ui.model.ToolReceiptState.Status.FAILED,
+          outputRef = event.outputRef
+        ) else trace
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ToolFailed -> current.copy(
+      status = WorkSession.Status.OBSERVING,
+      currentStepLabel = "${event.toolName} failed",
+      error = event.error,
+      toolReceipts = current.toolReceipts.map { trace ->
+        if (trace.callId == event.callId) trace.copy(
+          status = com.example.ui.model.ToolReceiptState.Status.FAILED,
+          error = event.error
+        ) else trace
+      },
+      updatedAtMs = event.timestampMs
+    )
+
+    is PreviewCardEvent.ToolProgress -> current.copy(
+      currentStepLabel = event.message,
+      updatedAtMs = event.timestampMs
+    )
+  }
 }

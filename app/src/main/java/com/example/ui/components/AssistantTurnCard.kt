@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,15 +58,15 @@ import com.example.ui.theme.AmberHybrid
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldOnline
-import com.example.ui.theme.PurpBorder
-import com.example.ui.theme.PurpDeep
-import com.example.ui.theme.PurpNeon
-import com.example.ui.theme.PurpPrimary
-import com.example.ui.theme.PurpPrimaryDark
+import com.example.ui.theme.CyanBorder
+
+
+
+import com.example.ui.theme.CyanNeonDark
 import com.example.ui.theme.PurpSurfaceCard
 import com.example.ui.theme.PurpSurfaceElevated
 import com.example.ui.theme.RoseOffline
-import com.example.ui.theme.TextHighlight
+
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -85,13 +86,15 @@ internal fun assistantVisibleText(
 fun TurnView(
   turn: TurnRecord,
   selectedCompanion: String,
+  runtimePetState: CompanionPetState? = null,
   modifier: Modifier = Modifier,
   onLongPress: (() -> Unit)? = null,
   onReadAloud: ((TurnRecord) -> Unit)? = null,
   onStopAloud: (() -> Unit)? = null,
   onRetryTurn: ((TurnRecord) -> Unit)? = null,
   onEditTurn: ((TurnRecord) -> Unit)? = null,
-  speakingTurnId: String? = null
+  speakingTurnId: String? = null,
+  onLessonAction: ((com.example.core.runtime.lesson.LessonAction) -> Unit)? = null
 ) {
   if (turn.role == "user") {
     UserTurnCard(
@@ -101,9 +104,10 @@ fun TurnView(
     )
   } else {
     AssistantCanvasTurn(
-      turn = turn, selectedCompanion = selectedCompanion, modifier = modifier,
+      turn = turn, selectedCompanion = selectedCompanion, runtimePetState = runtimePetState, modifier = modifier,
       onLongPress = onLongPress, onReadAloud = onReadAloud, onStopAloud = onStopAloud,
-      onRetryTurn = onRetryTurn, speakingTurnId = speakingTurnId
+      onRetryTurn = onRetryTurn, speakingTurnId = speakingTurnId,
+      onLessonAction = onLessonAction
     )
   }
 }
@@ -119,12 +123,14 @@ fun TurnView(
 private fun AssistantCanvasTurn(
   turn: TurnRecord,
   selectedCompanion: String,
+  runtimePetState: CompanionPetState? = null,
   modifier: Modifier = Modifier,
   onLongPress: (() -> Unit)? = null,
   onReadAloud: ((TurnRecord) -> Unit)? = null,
   onStopAloud: (() -> Unit)? = null,
   onRetryTurn: ((TurnRecord) -> Unit)? = null,
-  speakingTurnId: String? = null
+  speakingTurnId: String? = null,
+  onLessonAction: ((com.example.core.runtime.lesson.LessonAction) -> Unit)? = null
 ) {
   Column(
     modifier = modifier
@@ -137,7 +143,7 @@ private fun AssistantCanvasTurn(
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = assistantVisibleText(turn.content, turn.isStreaming, turn.activityStatus),
-          fontSize = 10.5.sp,
+          fontSize = 10.sp,
           lineHeight = 14.sp,
           color = Color(0xFFF8F5FF)
         )
@@ -153,13 +159,13 @@ private fun AssistantCanvasTurn(
       // PurpReaper shows its 2D state sprite; other companions use the 3D-rendered avatar.
       if (selectedCompanion == "PurpReaper") {
         PurpReaperAvatar(
-          companionState = if (turn.isStreaming) CompanionPetState.THINKING else CompanionPetState.IDLE,
+          companionState = if (turn.isStreaming) runtimePetState ?: CompanionPetState.THINKING else CompanionPetState.IDLE,
           isSelected = true,
           size = 32.dp
         )
       } else {
         PurpAngolinAvatar(
-          mood = if (turn.isStreaming) PurpAngolinMood.THINKING else PurpAngolinMood.IDLE,
+          mood = if (turn.isStreaming) petStateToMood(runtimePetState ?: CompanionPetState.THINKING) else PurpAngolinMood.IDLE,
           size = 32.dp,
           showGlow = turn.isStreaming
         )
@@ -184,7 +190,38 @@ private fun AssistantCanvasTurn(
       color = TextMuted,
       modifier = Modifier.padding(start = 4.dp, top = 2.dp)
     )
+    // LESSON TOOL: interactive lesson card projected from the live lesson engine
+    turn.lessonCard?.let { card ->
+      ChatLessonCard(
+        card = card,
+        onAction = { action -> onLessonAction?.invoke(action) },
+        modifier = Modifier.padding(top = 6.dp)
+      )
+    }
   }
+}
+
+/** One semantic bridge: canonical runtime state drives every companion pack. */
+internal fun petStateToMood(state: CompanionPetState): PurpAngolinMood = when (state) {
+  // ── Idle ────────────────────────────────────────────────────────────────────
+  CompanionPetState.IDLE -> PurpAngolinMood.IDLE
+  // ── Voice / audio ───────────────────────────────────────────────────────────
+  CompanionPetState.LISTENING, CompanionPetState.TRANSCRIBING -> PurpAngolinMood.LISTENING
+  CompanionPetState.SPEAKING, CompanionPetState.REPLYING, CompanionPetState.WRITING -> PurpAngolinMood.SPEAKING
+  // ── Reasoning ────────────────────────────────────────────────────────────────
+  CompanionPetState.THINKING, CompanionPetState.PLANNING,
+  CompanionPetState.SEARCHING, CompanionPetState.VERIFYING -> PurpAngolinMood.THINKING
+  // ── Tool / execution ────────────────────────────────────────────────────────
+  CompanionPetState.TOOL_CALL, CompanionPetState.RUNNING, CompanionPetState.CODING,
+  CompanionPetState.SAVED -> PurpAngolinMood.ACTIVE
+  // ── Repair / recovery ───────────────────────────────────────────────────────
+  CompanionPetState.FIXING, CompanionPetState.RECOVERING,
+  CompanionPetState.RETRY, CompanionPetState.WARNING -> PurpAngolinMood.DEGRADED
+  // ── Output / completion ─────────────────────────────────────────────────────
+  CompanionPetState.SUCCESS, CompanionPetState.VERIFIED -> PurpAngolinMood.FLOURISH
+  // ── Terminal / error ────────────────────────────────────────────────────────
+  CompanionPetState.ERROR, CompanionPetState.FAILED,
+  CompanionPetState.CANCELLED -> PurpAngolinMood.FAILED
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -214,7 +251,7 @@ fun UserTurnCard(
         .size(38.dp)
         .clip(RoundedCornerShape(12.dp))
         .background(
-          Brush.linearGradient(listOf(CyanAccent.copy(alpha = 0.7f), PurpDeep))
+          Brush.linearGradient(listOf(CyanAccent.copy(alpha = 0.7f), PurpSurfaceElevated))
         )
         .border(1.dp, CyanAccent.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
       contentAlignment = Alignment.Center
@@ -230,7 +267,7 @@ fun UserTurnCard(
           .fillMaxWidth()
           .combinedClickable(onClick = { onLongPress?.invoke() }, onLongClick = onLongPress)
           .testTag("user_turn_card"),
-        colors = CardDefaults.cardColors(containerColor = PurpNeon),
+        colors = CardDefaults.cardColors(containerColor = CyanNeon),
         shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
       ) {
@@ -262,7 +299,7 @@ fun UserTurnCard(
           }
           Text(
             text = turn.content,
-            fontSize = 10.5.sp,
+            fontSize = 10.sp,
             lineHeight = 14.sp,
             color = Color.White
           )
@@ -342,34 +379,17 @@ fun AssistantTurnCard(
       ) {
 
           // 1. REPLY BODY FIRST — AI replies take the space given to them so
-          //    users can read properly. No cramped thinking-bubble above.
-          //    While streaming and no text yet, show the live activity line
-          //    inline (single row, not a box) INSTEAD of the status box below
-          //    (which only renders once there's content or the turn is done).
-          if (turn.isStreaming && turn.content.isBlank() && !turn.reasoning.isNullOrBlank()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(
-                imageVector = Icons.Default.Psychology,
-                contentDescription = null,
-                tint = CyanNeon,
-                modifier = Modifier.size(15.dp)
-              )
-              Spacer(modifier = Modifier.width(7.dp))
-              Text(
-                text = "THINKING… ${(turn.activityStatus ?: "").take(40)}",
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                color = CyanNeon
-              )
-            }
-          }
+          //    users can read properly. STATUS BOX LAW (operator, 2026-09-02):
+          //    thinking/reasoning lives INSIDE the status box below — with the
+          //    token burn and kaomoji faces — never as a fake reply line in
+          //    the chat body.
 
           // Reply body (clean formatted answer, full width)
           if (turn.content.isNotBlank()) {
             Text(
               text = turn.content,
-              fontSize = 10.5.sp,
-              lineHeight = 14.sp,
+              fontSize = 9.5.sp,
+              lineHeight = 13.sp,
               // The chat canvas is dark in the canonical shell. Reply copy
               // gets an explicit high-contrast foreground so accent/theme
               // inheritance can never produce black-on-black assistant text.
@@ -385,12 +405,12 @@ fun AssistantTurnCard(
 
           // 2. STATUS BOX BELOW THE REPLY — one tidy block holding everything:
           //    thinking/reasoning (collapsible), tool calls, tokens, latency,
-          //    model + route. Neatly stacked, never thrown on. Hidden while
-          //    the turn is still streaming with no text (the inline THINKING…
-          //    line covers that phase) so we never show two thinking states.
+          //    model + route. Neatly stacked, never thrown on. It renders from
+          //    the first streamed token through completion, so THINKING and
+          //    WORKING phases are always visible in the box — never two
+          //    thinking states, never thinking leaked into the chat body.
           val hasActivity = turn.isStreaming || !turn.reasoning.isNullOrBlank() || turn.toolCalls.isNotEmpty()
-          val streamingNoTextYet = turn.isStreaming && turn.content.isBlank()
-          if (hasActivity && !streamingNoTextYet) {
+          if (hasActivity) {
             Spacer(modifier = Modifier.height(8.dp))
             Surface(
               modifier = Modifier
@@ -398,13 +418,23 @@ fun AssistantTurnCard(
                 .clip(RoundedCornerShape(10.dp))
                 .clickable { showActivity = !showActivity }
                 .testTag("activity_card"),
-              color = if (turn.isStreaming) PurpDeep.copy(alpha = 0.55f) else PurpSurfaceElevated,
+              color = if (turn.isStreaming) PurpSurfaceElevated.copy(alpha = 0.55f) else PurpSurfaceElevated,
               border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                if (turn.isStreaming) PurpNeon.copy(alpha = 0.6f) else PurpBorder
+                if (turn.isStreaming) CyanNeon.copy(alpha = 0.6f) else CyanBorder
               )
             ) {
               Column(modifier = Modifier.padding(9.dp)) {
+                // Kaomoji face law: decoration only, machine status stays canonical.
+                // Streaming turns carry the animated thinking face in the header.
+                val streamFace = kaomojiFrames("thinking_face").ifEmpty { listOf("(._.)") }
+                var streamFaceIdx by remember { mutableStateOf(0) }
+                LaunchedEffect(streamFace.size) {
+                  while (true) {
+                    kotlinx.coroutines.delay(420)
+                    streamFaceIdx = (streamFaceIdx + 1) % streamFace.size.coerceAtLeast(1)
+                  }
+                }
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   horizontalArrangement = Arrangement.SpaceBetween,
@@ -414,13 +444,13 @@ fun AssistantTurnCard(
                     Icon(
                       imageVector = Icons.Default.Psychology,
                       contentDescription = null,
-                      tint = if (turn.isStreaming) CyanNeon else PurpNeon,
+                      tint = if (turn.isStreaming) CyanNeon else CyanNeon,
                       modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(7.dp))
                     Text(
                       text = when {
-                        turn.isStreaming && turn.toolCalls.isEmpty() -> "THINKING…"
+                        turn.isStreaming && turn.toolCalls.isEmpty() -> "${streamFace[streamFaceIdx]} THINKING…"
                         turn.isStreaming -> "WORKING · ${turn.toolCalls.size} calls"
                         turn.toolCalls.isNotEmpty() -> "ACTIVITY · ${turn.toolCalls.size} calls"
                         else -> "REASONING"
@@ -429,7 +459,7 @@ fun AssistantTurnCard(
                       fontFamily = FontFamily.Monospace,
                       fontWeight = FontWeight.Bold,
                       letterSpacing = 0.8.sp,
-                      color = if (turn.isStreaming) CyanNeon else PurpNeon
+                      color = if (turn.isStreaming) CyanNeon else CyanNeon
                     )
                   }
                   Row(verticalAlignment = Alignment.CenterVertically) {
@@ -454,7 +484,9 @@ fun AssistantTurnCard(
 
                 AnimatedVisibility(visible = showActivity) {
                   Column(modifier = Modifier.padding(top = 7.dp)) {
-                    // Thinking / reasoning stream
+                    // Thinking / reasoning stream — visible here (collapsed by
+                    // default) in every phase. The status box is the ONLY place
+                    // thinking renders; the chat body never duplicates it.
                     if (!turn.reasoning.isNullOrBlank()) {
                       Text(
                         text = "REASONING",
@@ -467,14 +499,14 @@ fun AssistantTurnCard(
                         fontSize = 10.5.sp,
                         fontFamily = FontFamily.Monospace,
                         lineHeight = 14.sp,
-                        color = TextHighlight
+                        color = CyanNeon
                       )
                     }
                     // Tool call ledger inside the same status box
                     if (turn.toolCalls.isNotEmpty()) {
                       if (!turn.reasoning.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(7.dp))
-                        HorizontalDivider(color = PurpBorder, thickness = 0.5.dp)
+                        HorizontalDivider(color = CyanBorder, thickness = 0.5.dp)
                         Spacer(modifier = Modifier.height(5.dp))
                       }
                       Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -502,7 +534,7 @@ fun AssistantTurnCard(
 
         // 5. Telemetry Footer
         Spacer(modifier = Modifier.height(10.dp))
-        HorizontalDivider(color = PurpBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        HorizontalDivider(color = CyanBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
         Spacer(modifier = Modifier.height(6.dp))
 
         Row(
@@ -586,7 +618,7 @@ fun AssistantTurnCard(
         showGlow = turn.isStreaming,
         modifier = Modifier
           .clip(RoundedCornerShape(12.dp))
-          .border(1.dp, PurpNeon.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+          .border(1.dp, CyanNeon.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
       )
     }
     Spacer(modifier = Modifier.height(4.dp))
@@ -631,7 +663,7 @@ fun ToolCallLedgerItem(
     modifier = modifier.fillMaxWidth(),
     color = PurpSurfaceElevated,
     shape = RoundedCornerShape(6.dp),
-    border = androidx.compose.foundation.BorderStroke(0.5.dp, PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(0.5.dp, CyanBorder)
   ) {
     Column(modifier = Modifier.padding(6.dp)) {
       Row(
@@ -698,7 +730,7 @@ fun RoutingReceiptCard(
       .clickable { onToggle() }
       .testTag("routing_receipt_card"),
     color = PurpSurfaceElevated,
-    border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
   ) {
     Column(modifier = Modifier.padding(8.dp)) {
       Row(
@@ -719,7 +751,22 @@ fun RoutingReceiptCard(
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
-            text = "${receipt.modelMode.name} · ${receipt.routingProfile.name} · ${receipt.reasoningEffort.name}",
+            // PIN TRUTH LAW: the chip must prove requested → resolved → served.
+            // A chip showing only mode/profile is UI theatre — AUTO failover or a
+            // pin miss can serve a different model than the one requested.
+            text = buildString {
+              append(receipt.modelMode.name)
+              append(" · ").append(receipt.routingProfile.name)
+              if (receipt.requestedModel != "AUTO") {
+                append(" · PIN ")
+                if (receipt.requestedProvider != "AUTO") append(receipt.requestedProvider).append("/")
+                append(receipt.requestedModel)
+              }
+              append(" · ").append(receipt.resolvedProvider).append("/").append(receipt.resolvedModel)
+              if (!receipt.servedModel.isNullOrBlank() && receipt.servedModel != receipt.resolvedModel) {
+                append(" · SERVED ").append(receipt.servedProvider).append("/").append(receipt.servedModel)
+              }
+            },
             fontSize = 8.sp,
             fontFamily = FontFamily.Monospace,
             color = TextMuted
@@ -772,7 +819,7 @@ fun RoutingReceiptCard(
             fontSize = 8.5.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
-            color = PurpNeon
+            color = CyanNeon
           )
         }
       }
@@ -780,14 +827,14 @@ fun RoutingReceiptCard(
       // Expanded Audit Details
       AnimatedVisibility(visible = isExpanded) {
         Column(modifier = Modifier.padding(top = 6.dp)) {
-          HorizontalDivider(color = PurpBorder, thickness = 0.5.dp)
+          HorizontalDivider(color = CyanBorder, thickness = 0.5.dp)
           Spacer(modifier = Modifier.height(4.dp))
 
           Text(
             text = "REASON: ${receipt.routingReason}",
             fontSize = 8.5.sp,
             fontFamily = FontFamily.Monospace,
-            color = TextHighlight
+            color = CyanNeon
           )
 
           if (receipt.fallbackPath.isNotEmpty()) {

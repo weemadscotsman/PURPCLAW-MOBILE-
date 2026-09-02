@@ -100,36 +100,33 @@ class AndroidLocalModelHost(private val workspaceDir: File) : LocalModelHost {
     if (loaded == null || loaded.id != modelId) {
       throw IllegalStateException("Model $modelId is not currently loaded in LocalModelHost")
     }
-    val simulatedTokens = listOf("Local", " on-device", " inference", " response", " executed", " on", " Android", " CPU/NPU.")
-    val sb = StringBuilder()
-    for (t in simulatedTokens) {
-      sb.append(t)
-      onToken(t)
-    }
-    return sb.toString()
+    // ANTI-MOCK LAW (2026-09-02): no on-device inference engine (llama.cpp /
+    // ONNX / NNAPI runtime) is bundled, so this lane CANNOT infer. The old
+    // canned "Local on-device inference response executed on Android CPU/NPU."
+    // string looked like a real reply and lied to the operator. Fail with a
+    // typed, truthful error the router can surface instead.
+    throw UnsupportedOperationException(
+      "LOCAL_OFFLINE_NOT_IMPLEMENTED: '${loaded.name}' is registered but no on-device inference engine is bundled in this build"
+    )
   }
 
   override fun getCapabilities(): List<String> {
-    return listOf("gemma.local.inference", "gguf.loader", "nnapi.acceleration")
+    // Truthful until a real engine is wired: no on-device inference capability exists.
+    return emptyList()
   }
 
   override fun health(): String {
     val loaded = currentlyLoadedModel
     return if (loaded != null) {
-      "Loaded: ${loaded.name} (${loaded.sizeBytes / (1024 * 1024)}MB)"
+      "INERT: ${loaded.name} resident but no inference engine is bundled — cannot generate"
     } else {
-      "Standby: No model currently resident in RAM"
+      "Standby: no model resident; no on-device inference engine bundled"
     }
   }
 
   override suspend fun benchmark(modelId: String): LocalBenchmarkResult {
-    return LocalBenchmarkResult(
-      modelId = modelId,
-      loadTimeMs = 420L,
-      firstTokenLatencyMs = 85L,
-      tokensPerSecond = 24.5f,
-      ramUsageMb = 1840L,
-      exitState = "HEALTHY_STABLE"
-    )
+    // Anti-mock: the old hardcoded 420ms / 85ms / 24.5tps numbers were fabricated.
+    // Throw until a real engine exists to measure.
+    throw UnsupportedOperationException("LOCAL_BENCHMARK_NOT_IMPLEMENTED: no on-device inference engine is bundled")
   }
 }

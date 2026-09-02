@@ -5,8 +5,161 @@ before doing anything else. Compaction may murder conversation history; this fil
 work state. Update it whenever a task changes status — a task not reflected here does
 not exist.
 
-Last updated: 2026-08-30 00:00 Europe/London
-Session: 2,724-line NOSKIM master ingested; combined provider/WORK/avatar APK device-proven; navigation P0 is next
+Last updated: 2026-09-02 Europe/London
+Session: P0 failure-driven fixes — pin truth, status-box law, browser ownership, finalizer gate, capability-count truth, honest LOCAL lane; Gradle wrapper repaired; APK installed + boot-smoked on S25 RZCY9172MDP
+
+## 2026-09-02 ACTIVE CHECKPOINT — TRUTH FIXES, WRAPPER REPAIR, BOOT SMOKE
+
+### Build system
+- **Gradle wrapper was hand-broken**: `gradlew.bat` bypassed the wrapper and ran
+  `-jar ..\lib\gradle-gradle-cli-main-9.3.1.jar` (parent-dir lib), whose classpath
+  could not resolve `org.gradle.launcher.bootstrap.ProcessBootstrap`. The cached
+  `gradle-9.3.1-bin` distribution was also half-swapped (launcher jar modified
+  2026-09-02 02:52, missing ProcessBootstrap). Repair: purged the dist cache,
+  restored stock `gradlew.bat`/`gradlew` from gradle/gradle v9.3.1 (broken copies
+  kept as `gradlew.bat.handrolled.bak` / `gradlew.handrolled.bak`). First real
+  build: `BUILD SUCCESSFUL in 4m 47s` (fresh distribution download).
+
+### Fixes landed (all in this build)
+- `ProviderRouter.kt` — triple-prefix pin fix (stripped embedded provider prefix
+  from unresolved manual pins; restore log now reads `auto/AUTO`, previously
+  `groq/groq/qwen/qwen3.8-27b`). **NO SEED AUTHORITY LAW**: live `/models`
+  failure, exception, or EMPTY listing now leaves the catalogue EMPTY — the old
+  hardcoded seed lists (qwen-plus/kimi-moonshot/gpt-4o/glm-4.5/...) can no longer
+  pose as a live catalogue. MiniMax allowlist re-labelled truthfully
+  (`attested_allowlist_2026-08-29`; MiniMax exposes no chat /models). Failure
+  classes extended: `DEAD_ENDPOINT`, `TOOLS_UNSUPPORTED`, `PROMPT_TOO_LARGE`,
+  `CONTEXT_TOO_SMALL` (NIM dead function-UUIDs, Groq tool-schema + context walls
+  now typed, rotate the candidate, never kill the AUTO turn). Receipt carries
+  requested → resolved → served with per-attempt records.
+- `AssistantTurnCard.kt` — **STATUS BOX LAW (operator, 2026-09-02)**: thinking /
+  reasoning renders INSIDE the status box (animated kaomoji thinking face in the
+  header + token count), never as a fake reply line in the chat body; reasoning
+  visible while streaming (box collapsed by default). Routing-receipt chip proves
+  `MODE · profile · PIN provider/model · resolved[/model] · SERVED provider/model`
+  when served ≠ resolved.
+- `ToolRuntimeEngine.kt` — **browser ownership law**: `android.browser.embed` is
+  PurpClaw's own browser and the default for built artifacts and "open in your
+  browser"; `android.browser.open` is EXTERNAL-only (Chrome etc.), workspace
+  file:// and an explicit `embed:true` arg redirect to the embedded pane.
+- `MainViewModel.kt` — **finalizer gate**: `VerificationStarted/Passed/Failed`
+  now emitted from real receipts (ARTIFACT_WRITTEN / ARTIFACT_PREVIEW_VERIFIED /
+  RECEIPT_SIGNED / RESPONSE_DELIVERED + failed tool list) before
+  WorkCompleted/WorkBlocked — the live card can no longer strand mid-lifecycle
+  ("6/7 verified in OBSERVING"). Council seat failure categories extended to the
+  new typed classes.
+- `PurpCoreLifecycleService.kt` — **capability-count truth law**: broker counts
+  are taken AFTER `syncAllAndroidPermissions()` completes (was counted before
+  sync → "0 active" while camera/apps/network demonstrably worked), and the
+  label names what it counts ("N broker caps granted (comms/doc set)") — camera/
+  mic/network are tracked by their own engines and are not in this number.
+- `LocalModelHost.kt` — **anti-mock law**: the canned "Local on-device inference
+  response…" fake text is gone; the LOCAL lane now fails with a typed
+  `LOCAL_OFFLINE_NOT_IMPLEMENTED` error (no on-device inference engine is
+  bundled), capabilities list honest-empty, benchmark refuses to fabricate
+  numbers.
+- `SharedQuotaLedger.kt` — the four new typed failure classes + classification.
+
+### Physical evidence (S25, serial RZCY9172MDP)
+- arm64 APK 160,806,174 B, SHA-256 `eff9ac25c1b0b246096226b5721b80b9fafe3f2a03d29ee5af86cf1a651ea0a1`,
+  installed 2026-09-02 ~12:50, cold launch clean.
+- Boot smoke: 0 FATAL / 0 ANR; all catalogues live-refreshed at boot (NIM 46,
+  OpenRouter 21 free of 421, Groq 10, Cerebras 2, Google AI 36, Cloudflare 65;
+  missing-key providers skip honestly); `StartupSelfCheck passed=true caps=23
+  perms=5/6`; PurpCore notification shows the new truthful wording.
+
+### OPEN P0 (honest — none of these are certified)
+- Manual pin on-glass receipt pass: operator must drive a pinned chat turn and
+  read PIN = resolved = SERVED on the receipt chip (build ships the proof
+  surface; the pass needs the phone in hand).
+- ANR root-cause profiling; battery/screen-off survival certification (battery
+  optimisation deliberately left ON for hostile testing — do not grant the
+  exemption before certification).
+- Browser-ownership E2E TVG and the full website-build TVG on device.
+- Artifact URI resolution for local workspace files; provider output parser
+  (reasoning/tool markup → hidden reasoning + real ToolInvocation).
+- Structural: PermissionCentreScreen built but unmounted; agents_registry.json
+  (91) + skills_registry.json (30) parsed by nothing; AgentTowerManager still
+  carries fabricated mission data (anti-mock violation); artifact center DB
+  dead code; context compression absent; boot overlay timer-driven; no
+  on-device inference engine.
+
+## 2026-09-01 ACTIVE CHECKPOINT — KEYBOARD, CHAT, ROUTER RECOVERY, AVATAR
+
+- Exact live root cause for the broken Samsung keyboard was not target-SDK folklore:
+  Android InputDispatcher rejected Honeyboard touches because the full-screen on-top
+  avatar `SurfaceView` obscured the IME (`BLOCK_UNTRUSTED`, `NO_INPUT_CHANNEL`).
+- `PurpAngolinOverlayActor` now hides the renderer window for the IME lifetime and
+  shows the Compose-native identity projection instead. Filament is not resized during
+  the keyboard animation. When IME closes, the 3D renderer returns with the persisted
+  transform.
+- Exact final arm64 APK SHA-256:
+  `0D84E6A4A808FB6B60EB8C17EDAC68F9EE085441CCC35E4F54BBAB9767EE0FF1`.
+  Build/install/cold launch PASS on Samsung tablet `SM-X400`, serial `R52YA0ECHSH`.
+- Physical keyboard proof PASS: direct Honeyboard key taps produced `qwe`; logcat after
+  the taps contained zero `Untrusted touch` / `Dropping untrusted touch` events. Send
+  accepted the message and chat returned a real model reply.
+- Avatar visibility root cause fixed: a newer framing multiplier trusted the compact
+  GLB's false ~0.017m bind-pose bounds even though its animated skinned mesh is already
+  authored at normal metre scale. Restored the last physically proven source-scale
+  framing and removed the false 97x correction.
+- Seated/turned animation silhouette exceeded the former 150dp clamp envelope. The
+  canonical envelope is now 260dp at scale 0.40, so full head, hands, knees and boots
+  remain inside the right edge on SM-X400.
+- Physical semantic animation proof PASS for four real fully-skinned assets/states:
+  `thinking -> Confused_Scratch`, `speaking -> Agree_Gesture`,
+  `success -> Happy_jump_f`, `idle -> Chair_Sit_Idle_F`. Screenshots:
+  `C:/Temp/purpclaw-tablet-3d-thinking-proof.png`,
+  `C:/Temp/purpclaw-tablet-3d-speaking-proof.png`, and
+  `C:/Temp/purpclaw-tablet-3d-idle-after-reply.png`.
+- AUTO recovery proof PASS for ordinary chat: OpenRouter returned a typed 404 because
+  the candidate did not support the requested Android tool schema; the same turn
+  continued and completed through NVIDIA NIM. Final telemetry identified the concrete
+  NIM model instead of `AUTO -> none`.
+- **OPEN P0:** historical Podcast/Council rows visibly fail in 18–43ms with typed
+  `PROVIDER_EXCEPTION`. Shared provider capability filtering/fan-out recovery remains
+  unverified for Podcast and must not inherit the ordinary-chat PASS.
+- **OPEN P0:** model prose still stated stale/invented runtime counts (13 tools / 9
+  agents) while the route telemetry was truthful. Runtime inventory claims must be
+  injected from verified observations or omitted, never improvised by the model.
+- **OPEN:** physical avatar spin, hold-drag, pinch limits and all remaining semantic
+  states (listening, working/tool, error, greeting/dance) require exact-build retest;
+  prior receipts are historical and do not certify this APK.
+
+## 2026-08-31 ACTIVE CHECKPOINT — VOICE, STEERING, LIVE WORK CARD
+
+- Constitution preflight repaired for the reorganized canonical docs tree;
+  `purpclaw constitution validate` now returns VALID.
+- Kokoro no longer depends on Android native TTS initialization. Exact arm64 APK built,
+  installed on physical S25 `RZCY9172MDP`, and Read Aloud played a real 24 kHz WAV from
+  the app cache through MediaPlayer. Log route: `voice_provider=kokoro`, 2.4 s playback,
+  clean completion/release, no fatal crash. Screenshot:
+  `C:/Temp/purpclaw-s25-kokoro-proof.png`.
+- Added durable steering sessions anchored to the active WorkSession/turn/checkpoint.
+  Raw messages persist verbatim before compression; 1200 ms burst quiet-window,
+  SteeringDelta, plan revision, cancellation, before-tool, after-tool/resume and
+  before-final hooks are integrated. A late steering delta that requests tools now
+  re-enters a bounded same-turn tool loop; it is never acknowledged as complete merely
+  because the first draft existed. Crash persistence now includes the compiled delta.
+- Root cause of the visually stale WorkSession card found: `activeWorkServiceTurnId`
+  was nulled before the later `WorkCompleted` emission guard, making completion events
+  unreachable. Completion/block events now emit before ownership clears.
+- One PreviewCardEvent spine now projects `PLANNING -> EXECUTING -> OBSERVING ->
+  VERIFYING -> RESPONDING -> COMPLETED`. Foreground status, card and companion consume
+  that same phase projection. Continuation-loop tools now emit the same typed card
+  events as direct tools.
+- Live card now retains expandable per-call tool receipts: real call ID, tool name,
+  RUNNING/VERIFIED/FAILED, evidence reference or exact failure. Direct tool start/end
+  now reuse one call ID instead of generating mismatched timestamps.
+- Targeted WorkSession projection test covers planning, execution, observation,
+  response and durable completion plus tool receipt transitions.
+- Flagship acceptance queue is now explicit:
+  1. Home-offline phone-sovereign `PURPCLAW S25 FIELD CONSOLE` build.
+  2. Home-connected real multi-agent `PURPCLAW FIELD STATION` build with actual Souls,
+     registry-backed skills, non-overlapping ownership, merge gates, QA/rework and
+     final runnable project.
+  3. Twenty identical voice turns with eight latency timestamps; turn 20 must not
+     trend slower than turn 2 and STT/TTS ownership/queues must return to clean idle.
 
 ---
 
@@ -695,3 +848,126 @@ lines each and byte-for-byte equivalent in requirements. This adds the following
   extract evidence frames, transcribe any speech, answer temporally with visible frames,
   and persist the complete lineage. Never describe pixels that were not inspected.
 WORK_SESSION_SPEC: voice->WorkSession->plan+acceptance->execution(foreground/WorkManager)->save artifacts->verify->receipt->notification(OPEN CODE/RESULT/RECEIPT/RESUME/CANCEL). Build verified. Waiting operator scope confirm.
+
+## 2026-08-31 TABLET RECOVERY + VOICE / INPUT REOPENED GATES
+
+Physical target: Samsung `SM_X400`, ADB serial `R52YA0ECHSH`.
+
+- **Storage recovery PASS:** operator-authorised removal of clearly identified games
+  increased `/data` free space from ~803 MB to ~31 GB. Finance, banking, messaging,
+  documents, photos, media services and Samsung/Android system packages were preserved.
+- **State preservation PASS:** pre-uninstall app data was archived to
+  `C:/Temp/purpclaw-tablet-appdata-20260831.tar`; the sovereign chat database and shared
+  preferences were restored after reinstall. Encrypted-vault entries remain subject to
+  Android Keystore validity after uninstall and must be re-authorised if the OS removed
+  their key.
+- **APK build/install PASS:** `:app:compileDebugKotlin`, `:app:testDebugUnitTest`, and
+  `:app:assembleDebug` passed; current arm64 APK installed successfully on the tablet.
+- **Composer/IME PASS (current build):** physical Compose editor gained focus and Samsung
+  keyboard rendered on glass with a valid input connection. This does not close the
+  Android touch-delay warning: the required no-avatar-host A/B test remains OPEN.
+- **Microphone capture PASS:** real recognizer session opens and system audio capture runs;
+  existing visualizer is driven by actual mic RMS.
+- **STT lifecycle correction PASS (silence case):** Android `NO_SPEECH_DETECTED` is now a
+  recoverable no-input event, not sticky `VoiceMode.ERROR`. Real partial hypotheses are
+  promoted when the vendor recognizer returns an empty final result; `EXTRA_LANGUAGE` now
+  receives the required IETF language tag string. Compile, unit and silent physical run
+  passed without crash.
+- **STT spoken transcription PENDING PHYSICAL:** operator must speak a known phrase into
+  this exact APK; PASS requires visible final text and continuation into the same turn.
+- **Own TTS / stable Soul voices OPEN:** Android currently maps canonical Kokoro IDs onto
+  installed platform voices. That is a deterministic fallback, not authoritative Kokoro
+  synthesis. Extend the existing `TextToSpeechEngine` through the shared voice provider
+  boundary: Soul-owned profile -> healthy Kokoro/local provider -> typed deterministic
+  fallback. Preserve one speech queue, `tts.finished` turn handoff, barge-in and no voice
+  roulette. Do not create a second podcast/mobile voice runtime.
+- **SurfaceView touch interference OPEN P0:** perform controlled current-vs-no-avatar-host
+  physical A/B. If omitting construction of the native avatar host removes Android's
+  touch-delay warning, keep rendering non-interactive and put gestures in a bounded
+  Compose-owned avatar hit target. Do not add more composer focus hacks.
+- **Camera ownership PASS-looking / regression required:** fresh chat launch produced no
+  `Camera 0 ACTIVE` evidence; camera must remain lazy and release after real capture.
+- **Router / AUTO failover OPEN:** repeat HOME-OFFLINE WORK creation task and forbid
+  `AUTO -> none` while any eligible phone route remains.
+- **Avatar semantic-state proof OPEN:** packaged GLBs are skin+animation admitted and
+  T-pose is suppressed in code. Physical proof still required for idle, listening,
+  thinking, tool/working, speaking, success, error and greeting, plus full-screen bounded
+  drag/spin/pinch without blocking chat controls.
+
+## 2026-09-01 TABLET COMPOSER / 3D IME / FREE ROUTER RECEIPT
+
+Physical target: Samsung `SM_X400`, ADB serial `R52YA0ECHSH`, Android 16.
+
+- **Composer controls RESTORED / PHYSICAL PASS:** the canonical toolbar again exposes
+  `CHAT`, `WORK`, live `AUTO` model selector, `+` action sheet, microphone, PurpClaw
+  navigation and Send/Cancel. UIAutomator observed every control in the installed APK;
+  screenshot: `C:/Temp/purpclaw-controls-proof.png`.
+- **Keyboard + real 3D coexistence PHYSICAL PASS:** PurpAngolin remains the real fully
+  rigged/animated Filament GLB while Samsung Honeyboard is open. No flat fallback image
+  is constructed. The renderer SurfaceView is physically shortened to the IME top
+  (`1320x1329`, not the prior full-screen `1320x2112` surface). Screenshot:
+  `C:/Temp/final-real-3d-ime-v2.png`.
+- **Touch acceptance PHYSICAL PASS:** three direct screen taps on Honeyboard entered
+  `qwe` into the Compose editor (final editor value `123qwe`). Samsung logcat contained
+  zero `Untrusted touch due to occlusion`, `BLOCK_UNTRUSTED`, or dropped-untrusted-touch
+  events. Screenshot: `C:/Temp/final-typed-3d.png`.
+- **Plus action entry point PHYSICAL PASS:** installed UI exposes real File, Folder,
+  Camera, Gallery/Photo, URL and Clipboard actions with unavailable actions truthfully
+  disabled/reasoned. Screenshot: `C:/Temp/final-plus-menu.png`.
+- **OpenRouter cost incident MITIGATED / ACCOUNT RECONCILIATION OPEN:** AUTO currently
+  fails closed away from OpenRouter. Manual OpenRouter invocation is rejected before HTTP
+  unless the exact live id is `openrouter/free` or ends in `:free`; gateway type alone no
+  longer bypasses the spend gate. This prevents further silent paid AUTO traffic but does
+  not by itself prove which historical request created the reported account charge.
+- **Daily live catalogues PHYSICAL PASS:** boot logs prove NIM `/v1/models` and OpenRouter
+  `/api/v1/models` refresh on the tablet. OpenRouter admitted only live zero/zero-priced
+  records. NIM AUTO now rejects live code-completion, vision, reward, parser, embedder,
+  reranker, safety and other non-chat families; focused classifier unit tests pass.
+- **Installed acceptance APK:** SHA-256
+  `0E1D035F5D4B2A4CA24DB4E610371F9DB8A7F7D226C82352953FD77311BC570D`.
+- **Still OPEN:** physical pinch acceptance; spoken STT continuation; full AUTO WORK
+  build benchmark; provider account-side charge reconciliation; full PM2 role extraction
+  integration; complete podcast failure/recovery and lifecycle torture matrix.
+
+## 2026-09-01 SESSION — ROOT CAUSE AUDIT + NO-SKIM LEDGER INTEGRATION
+
+**P0-A Freeze Evidence:** DONE. `var/probes/purp_proof1.png` (709,943 bytes) and `purp_ui.xml`
+  (32,751 bytes) from tablet `R52YA0ECHSH`. UIAutomator confirmed 62 labeled nodes.
+  Council 6-seat failure captured in XML with exact error: all seats returning
+  `PROVIDER_EXCEPTION` at 15–21ms — consistent with immediate local rejection.
+
+**P0-C Routing (FREE_MODELS):** ALREADY DONE. `CommandPanel.tsx` lines 1065–1080 wire
+  `/api/free-models` on mount. Route exists at `apps/web/app/api/free-models/route.ts`
+  and performs live discovery via `openrouter-catalog.js` + `nim-catalog.js`. No
+  hardcoded FREE_MODELS constant. Source claim of failed edit was self-corrected.
+
+**P0-D Council Root Cause:** CONFIRMED. `PROVIDER_EXCEPTION` at 15–21ms = immediate local
+  401 from Android KeystoreVault. `ProviderRouter.kt` line 1559 fires:
+  `"401 Unauthorized: OPENROUTER_API_KEY missing in KeystoreVault"`. The key is not
+  seeded into Android Keystore. PM2 confirms Home API port 7780 is offline — even if
+  it were running, Council on Android would still 401 without the key.
+  **Fix required:** seed `OPENROUTER_API_KEY` into Android KeystoreVault.
+  **Secondary:** bring up Home API at port 7780 (currently zero services in PM2).
+
+**SEC-001 NVIDIA key:** FIXED. `credentials.json` nvidia apiKey replaced with
+  `«redacted»`.
+
+**RUN-001 (Xiaozhi port 7788 ECONNREFUSED):** `companion/xiaozhi_bridge.js` expects
+  Samantha voice service on `SAMANTHA_PORT=7788` — not running. Not critical path
+  for current stack.
+
+**RUN-002 (companion_swarm.js tower personality layer missing):** `companion_swarm.js`
+  is a pure file loader reading `skills/{agent}/AGENT.md|SKILL.md|GOALS.md|PROTOCOLS.md`.
+  The "missing layer" error means consuming code expects a different interface from the
+  loader — requires code trace to find exact call site.
+
+**No bulk PM2 restart performed.** 27-service ecosystem confirmed absent. Lifecycle
+  classification required before any restart.
+
+**NO-SKIM LEDGER integrated.** 126-item checklist confirmed. Key laws recorded:
+  - Unknown != zero
+  - Logged != verified
+  - Tool success != task success
+  - PurpClaw does not mark its own homework
+  - Fresh probe beats stale memory; preserve discrepancy
+  - DONE != COMPLETED
