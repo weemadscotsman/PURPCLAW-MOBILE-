@@ -61,11 +61,27 @@ class SessionMeshCoordinator(
    * the live response. On failure -> Sovereign Local takeover.
    */
   suspend fun probeHomeNode(): MeshStatus {
+    // HOME-LINK DORMANCY LAW: no probing while the settings opt-in is off —
+    // a disabled link must cost zero network traffic and zero log spam.
+    if (!HomeRuntimeBridge.homeLinkEnabled) {
+      if (_meshStatus.value != MeshStatus.SOVEREIGN_LOCAL) {
+        triggerLocalTakeover("home link disabled (settings opt-in off)")
+      }
+      return _meshStatus.value
+    }
     val result = HomeRuntimeBridge.probeHealth()
     return when {
       // Reachable AND every subsystem clean -> full attach.
       result.online && (result.status == "ONLINE" || result.status.isNullOrBlank()) -> {
         _meshStatus.value = MeshStatus.HOME_ONLINE
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "SessionMeshCoordinator",
+          kind = "mesh_state",
+          decision = "HOME_ONLINE",
+          success = true,
+          input = "status=${result.status} tower=${result.towerStatus} agents=${result.agentCount}",
+          output = "runtimeId=${result.runtimeId}"
+        )
         _homeNode.value = _homeNode.value.copy(
           online = true,
           lastHeartbeatMs = System.currentTimeMillis(),
@@ -79,6 +95,14 @@ class SessionMeshCoordinator(
       // Reachable but degraded (e.g. tower down) -> Home stays usable; chat routes through it.
       result.online -> {
         _meshStatus.value = MeshStatus.HYBRID_DEGRADED
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "SessionMeshCoordinator",
+          kind = "mesh_state",
+          decision = "HYBRID_DEGRADED",
+          success = true,
+          input = "status=${result.status} tower=${result.towerStatus}",
+          output = "chatCapable=${result.chatCapable}"
+        )
         _homeNode.value = _homeNode.value.copy(
           online = true,
           lastHeartbeatMs = System.currentTimeMillis(),

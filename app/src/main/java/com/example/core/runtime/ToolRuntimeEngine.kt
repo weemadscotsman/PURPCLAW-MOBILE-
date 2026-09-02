@@ -757,6 +757,10 @@ class ToolRuntimeEngine(
       ?: "call_${UUID.randomUUID().toString().take(8)}"
     recordToolLifecycleEvent("tool.requested", callId, toolName, actorAgent, "REQUESTED", arguments)
     recordToolLifecycleEvent("tool.started", callId, toolName, actorAgent, "STARTED", arguments)
+    // TELEMETRY (operator 2026-09-02): the terminal record is written by
+    // finalizeTerminalToolResult(). The begin() here is intentionally not
+    // used — RouterTool.executionResult flows through finalizeTerminalToolResult
+    // where the success/failure/audit state is fully known.
 
     // EXECUTION POLICY LAW: one gate decides CHAT vs WORK authority. Lease is
     // recorded for provenance only, never enforced.
@@ -1894,7 +1898,7 @@ class ToolRuntimeEngine(
     val record = result.record
     val receipt = result.proofReceipt ?: createTerminalReceipt(record, actorAgent, lease)
     val terminalKind = if (record.isSuccess) "tool.completed" else "tool.failed"
-    return try {
+    val terminal = try {
       receiptDao?.insertReceipt(receipt.toEntity())
       val eventPersisted = recordToolLifecycleEvent(
         terminalKind,
@@ -1912,7 +1916,21 @@ class ToolRuntimeEngine(
         proofReceipt = receipt,
         auditOutcome = if (receiptDao != null && canvasDao != null) "PERSISTED" else "IN_MEMORY_ONLY",
         overallTruth = if (record.isSuccess) "SUCCESS" else "FAILED"
-      )
+      ).also { terminalResult ->
+        // TELEMETRY: every tool call finalises with a routing-telemetry entry.
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "ToolRuntimeEngine",
+          kind = "tool_execute",
+          decision = if (record.isSuccess) "completed" else "failed",
+          success = record.isSuccess,
+          durationMs = record.durationMs,
+          sessionId = record.id,
+          input = "tool=${record.toolName} actor=$actorAgent affinity=${record.affinity}",
+          output = "outcome=${record.isSuccess} truth=${terminalResult.overallTruth} audit=${terminalResult.auditOutcome}",
+          errorClass = if (record.isSuccess) "" else "TOOL_FAILED",
+          errorMessage = if (record.isSuccess) "" else record.output.take(500)
+        )
+      }
     } catch (auditError: Exception) {
       Log.e(TAG, "Tool ${record.id} executed but terminal audit persistence failed", auditError)
       val explicit = record.copy(
@@ -1931,8 +1949,24 @@ class ToolRuntimeEngine(
         proofReceipt = receipt,
         auditOutcome = "FAILED",
         overallTruth = if (record.isSuccess) "EXECUTION_SUCCEEDED_AUDIT_WRITE_FAILED" else "FAILED_AUDIT_WRITE_FAILED"
-      )
+      ).also { failedResult ->
+        // TELEMETRY: terminal audit failure also recorded (caller sees a
+        // explicit failure in the per-day JSONL).
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "ToolRuntimeEngine",
+          kind = "tool_execute",
+          decision = "audit_write_failed",
+          success = false,
+          durationMs = record.durationMs,
+          sessionId = record.id,
+          input = "tool=${record.toolName} actor=$actorAgent",
+          output = "truth=${failedResult.overallTruth}",
+          errorClass = "AUDIT_WRITE_FAILED",
+          errorMessage = auditError.message ?: "audit write failed"
+        )
+      }
     }
+    return terminal
   }
 
   private fun createTerminalReceipt(

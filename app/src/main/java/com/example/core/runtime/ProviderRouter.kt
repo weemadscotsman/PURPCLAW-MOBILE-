@@ -1076,7 +1076,20 @@ class ProviderRouter(
         latencyMs = System.currentTimeMillis() - startTime,
         errorMessage = "NO_ELIGIBLE_ROUTE",
         routingReceipt = receipt
-      )
+      ).also {
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "ProviderRouter",
+          kind = "model_route",
+          decision = "NO_ELIGIBLE_ROUTE",
+          success = false,
+          durationMs = it.latencyMs,
+          sessionId = sessionId,
+          input = "preferredProvider=$preferredProvider modelClass=${if (toolsRequired) "tool" else "chat"}",
+          output = "candidates=${candidates.size}",
+          errorClass = "NO_ELIGIBLE_ROUTE",
+          errorMessage = "no eligible FREE chat model available (empty catalogue or all quarantined)"
+        )
+      }
     }
 
     // OWNER-FIRST LAW (operator 2026-09-01): MiniMax is Eddie's paid sub — it goes
@@ -1332,7 +1345,22 @@ class ProviderRouter(
     return@withContext (lastResult ?: ProviderExecutionResult(
       content = "", providerModel = "none", tokenCount = 0,
       latencyMs = System.currentTimeMillis() - startTime, errorMessage = finalErr
-    )).copy(routingReceipt = receipt, latencyMs = System.currentTimeMillis() - startTime)
+    )).copy(routingReceipt = receipt, latencyMs = System.currentTimeMillis() - startTime).also { finalRes ->
+      // TELEMETRY: every AUTO rotation outcome is queryable.
+      val errMsg = finalRes.errorMessage.orEmpty()
+      com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+        router = "ProviderRouter",
+        kind = "model_route",
+        decision = if (errMsg.isBlank()) "served:${finalRes.providerModel}" else "FAILED",
+        success = errMsg.isBlank(),
+        durationMs = finalRes.latencyMs,
+        sessionId = sessionId,
+        input = "preferredProvider=$preferredProvider candidates=${allCandidates.size}",
+        output = "served=${finalRes.providerModel} attempts=${attemptRecords.size} fallback=${receipt.fallbackPath.size}",
+        errorClass = if (errMsg.isBlank()) "" else "ALL_EXHAUSTED",
+        errorMessage = errMsg
+      )
+    }
   }
     // (rotation path above returns directly; no single-pin post-handling)
 
@@ -1786,6 +1814,17 @@ class ProviderRouter(
       // for that filter (page 1 only — pages 2-5 are client-side rendered).
       Log.i(TAG, "NIM catalogue refreshed from live /v1/models: chat=${models.size} callable models (after classifier ∩ build.nvidia.com Free Endpoint editorial filter)")
       Log.i(TAG, "NIM live chat ids=${models.joinToString { it.id }}")
+      // Telemetry: record the routing decision so it's queryable later.
+      com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+        router = "ProviderRouter",
+        kind = "nim_catalogue_refresh",
+        decision = "loaded_chat_models",
+        success = true,
+        durationMs = 0L,
+        sessionId = "",
+        input = "freeEndpointNames.size=${freeEndpointNames.size}",
+        output = "raw=$rawTotal chat=${models.size} ids=${models.joinToString { it.id }}"
+      )
       models.size
     } catch (e: Exception) {
       // e.message can be null (e.g. UnknownHostException with no message) — log class name so it's never just "failed: null"

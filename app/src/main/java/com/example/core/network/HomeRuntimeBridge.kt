@@ -45,6 +45,38 @@ object HomeRuntimeBridge {
 
   fun currentBaseUrl(): String = baseUrl
 
+  /**
+   * HOME-LINK DORMANCY LAW (2026-09-02): Home is NOT a provider. It is a link
+   * to the user's home PC that exists ONLY while the user has opted in via
+   * Settings (RoutingState.useHomeRouting). While disabled, every bridge
+   * method fails fast WITHOUT touching the network — no probes, no roster
+   * fetches, no telemetry pushes. Inference runs on the phone's own AUTO
+   * router catalogue (real cloud providers) meanwhile. MainViewModel keeps
+   * this flag in lockstep with the Settings toggle and persists it.
+   */
+  @Volatile
+  var homeLinkEnabled: Boolean = false
+    private set
+
+  fun setHomeLinkEnabled(enabled: Boolean) {
+    if (homeLinkEnabled == enabled) return
+    homeLinkEnabled = enabled
+    Log.i(
+      TAG,
+      if (enabled) "Home link ACTIVE (settings opt-in on)"
+      else "Home link DORMANT (settings opt-in off) — all bridge calls fail fast, zero network"
+    )
+    // TELEMETRY (operator 2026-09-02): every home link state change is recorded.
+    com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+      router = "HomeRuntimeBridge",
+      kind = "link_state",
+      decision = if (enabled) "ACTIVE" else "DORMANT",
+      success = true,
+      input = "enabled=$enabled",
+      output = "homeLinkEnabled=$enabled"
+    )
+  }
+
   // STEP 12 (2026-08-27): durable routing-decision ledger.
   // chatWithTools() persists a DispatchReceipt per call with
   // decisionSource = CORE_RELAY (home core made the routing decision).
@@ -117,6 +149,19 @@ object HomeRuntimeBridge {
 
   /** GET /api/health — REAL values only, straight from the canonical runtime. */
   suspend fun probeHealth(): HealthResult = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext HealthResult(
+      online = false, latencyMs = 0, error = "HOME_LINK_DISABLED"
+    ).also {
+      com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+        router = "HomeRuntimeBridge",
+        kind = "probe_health",
+        decision = "skipped",
+        success = false,
+        durationMs = 0L,
+        input = "baseUrl=$baseUrl",
+        output = "skipped reason=HOME_LINK_DISABLED"
+      )
+    }
     val start = System.currentTimeMillis()
     try {
       val request = Request.Builder()
@@ -146,14 +191,39 @@ object HomeRuntimeBridge {
         runtimeVersion = runtime?.optString("version"),
         uptimeSeconds = if (json.has("uptime")) json.getDouble("uptime") else null,
         raw = body.take(400)
-      )
+      ).also { healthResult ->
+        // TELEMETRY: every home probe decision is recorded.
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "HomeRuntimeBridge",
+          kind = "probe_health",
+          decision = if (healthResult.online) "online:${healthResult.status}" else "offline",
+          success = healthResult.online,
+          durationMs = healthResult.latencyMs,
+          input = "baseUrl=$baseUrl",
+          output = "status=${healthResult.status} tower=${healthResult.towerStatus} agents=${healthResult.agentCount} runtimeId=${healthResult.runtimeId}",
+          errorClass = if (healthResult.online) "" else "PROBE_FAILED",
+          errorMessage = healthResult.error.orEmpty()
+        )
+      }
     } catch (e: Exception) {
       Log.w(TAG, "Home health probe failed: ${e.message}")
       HealthResult(
         online = false,
         latencyMs = System.currentTimeMillis() - start,
         error = "${e.javaClass.simpleName}: ${e.message}"
-      )
+      ).also { failed ->
+        com.example.core.runtime.RoutingTelemetry.getOrNull()?.record(
+          router = "HomeRuntimeBridge",
+          kind = "probe_health",
+          decision = "exception",
+          success = false,
+          durationMs = failed.latencyMs,
+          input = "baseUrl=$baseUrl",
+          output = "exception=${e.javaClass.simpleName}",
+          errorClass = e.javaClass.simpleName,
+          errorMessage = e.message ?: "probe exception"
+        )
+      }
     }
   }
 
@@ -170,6 +240,9 @@ object HomeRuntimeBridge {
 
   /** GET /api/capabilities — the PC's own advertised provider/model truth. */
   suspend fun probeCapabilities(): CapabilitiesResult = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext CapabilitiesResult(
+      reachable = false, error = "HOME_LINK_DISABLED"
+    )
     try {
       val request = Request.Builder()
         .url("$baseUrl/api/capabilities")
@@ -240,6 +313,11 @@ object HomeRuntimeBridge {
     fullSystemScope: Boolean = false,
     requestTimeoutMs: Long? = null
   ): ChatResult = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext ChatResult(
+      ok = false, reply = "", provider = null, model = null, sessionId = null,
+      toolCalls = 0, agentCalls = 0, fallbackCount = 0, durationMs = 0,
+      route = null, error = "HOME_LINK_DISABLED"
+    )
     val start = System.currentTimeMillis()
     try {
       val payload = JSONObject().apply {
@@ -387,6 +465,11 @@ object HomeRuntimeBridge {
     fullSystemScope: Boolean = false,
     toolChoice: String = "auto"
   ): ChatWithToolsResult = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext ChatWithToolsResult(
+      ok = false, reply = "", provider = null, model = null, sessionId = null,
+      toolCalls = emptyList(), agentCalls = 0, fallbackCount = 0, durationMs = 0,
+      route = null, error = "HOME_LINK_DISABLED"
+    )
     val start = System.currentTimeMillis()
     try {
       val payload = JSONObject().apply {
@@ -511,6 +594,7 @@ object HomeRuntimeBridge {
   /** POST /api/steer — operator steering / DRIVE delegation into the canonical resolver. */
   suspend fun steer(action: String, directive: String = "", sessionId: String? = null): String =
     withContext(Dispatchers.IO) {
+      if (!homeLinkEnabled) return@withContext "{\"ok\":false,\"error\":\"HOME_LINK_DISABLED\"}"
       try {
         val payload = JSONObject().apply {
           put("action", action)
@@ -531,6 +615,7 @@ object HomeRuntimeBridge {
 
   /** GET /api/memory — canonical runtime memory snapshot (facts + notes). */
   suspend fun fetchCanonicalMemory(): String = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext "{\"error\":\"HOME_LINK_DISABLED\"}"
     try {
       val request = Request.Builder().url("$baseUrl/api/memory").build()
       val response = client.newCall(request).execute()
@@ -559,6 +644,7 @@ object HomeRuntimeBridge {
 
   /** GET /api/registry/agents — canonical soul roster from the main stack. */
   suspend fun fetchAgentRoster(): List<RosterAgent> = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext emptyList()
     try {
       val request = Request.Builder().url("$baseUrl/api/registry/agents").build()
       val response = client.newCall(request).execute()
@@ -623,6 +709,9 @@ object HomeRuntimeBridge {
   ): AgentJobResult = withContext(Dispatchers.IO) {
     if (soulId.isBlank() || task.isBlank()) {
       return@withContext AgentJobResult(false, error = "agentId and task are required")
+    }
+    if (!homeLinkEnabled) {
+      return@withContext AgentJobResult(false, error = "HOME_LINK_DISABLED")
     }
     var activeJobId: String? = null
     try {
@@ -692,6 +781,7 @@ object HomeRuntimeBridge {
 
   /** GET /api/skills/registry — canonical skills from the main stack. */
   suspend fun fetchSkillRoster(): List<RosterSkill> = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext emptyList()
     try {
       val request = Request.Builder().url("$baseUrl/api/skills/registry").build()
       val response = client.newCall(request).execute()
@@ -725,6 +815,7 @@ object HomeRuntimeBridge {
   )
 
   suspend fun fetchVoiceSettings(): VoiceSettings? = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext null
     try {
       val request = Request.Builder().url("$baseUrl/api/settings").build()
       val response = client.newCall(request).execute()
@@ -750,6 +841,7 @@ object HomeRuntimeBridge {
 
   /** POST /api/settings — push voice.* changes so web + android stay one truth. */
   suspend fun pushVoiceSettings(s: VoiceSettings): Boolean = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext false
     try {
       val payload = JSONObject()
       s.mode?.let { payload.put("voice.mode", it) }
@@ -775,6 +867,7 @@ object HomeRuntimeBridge {
    * Returns true when core acknowledged the pin.
    */
   suspend fun pinRouter(provider: String, model: String): Boolean = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext false
     try {
       val payload = JSONObject()
         .put("provider", provider)
@@ -819,6 +912,7 @@ object HomeRuntimeBridge {
     bubbleRole: String = "assistant",
     ttsState: String = "IDLE",
   ): List<MessageActionRow> = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext emptyList()
     try {
       val request = Request.Builder()
         .url("$baseUrl/api/message-action?surface=mobile&bubbleRole=$bubbleRole&ttsState=$ttsState")
@@ -855,6 +949,9 @@ object HomeRuntimeBridge {
     bubbleRole: String = "assistant",
     bubbleText: String = "",
   ): MessageActionResult = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext MessageActionResult(
+      ok = false, errorReason = "HOME_LINK_DISABLED"
+    )
     try {
       val bubble = JSONObject().put("id", bubbleId).put("role", bubbleRole).put("text", bubbleText)
       val payload = JSONObject()
@@ -895,6 +992,57 @@ object HomeRuntimeBridge {
     } catch (e: Exception) {
       Log.w(TAG, "Action rail dispatch failed: ${e.message}")
       MessageActionResult(ok = false, errorReason = e.message ?: "network error")
+    }
+  }
+
+  // ── TTS ROUTING TELEMETRY (2026-09-01) ─────────────────────────────────
+  // Observable TTS engine state so the canonical stack knows whether Kokoro or
+  // native TTS handled each utterance. The PC-side router can surface this as
+  // a /api/tts/routing status endpoint.
+
+  /**
+   * Push one TTS routing event to the canonical core. Core stores it in an
+   * in-memory ring buffer keyed by nodeId so /api/tts/routing can serve the
+   * last N events per source.
+   *
+   * @param engine "kokoro" | "native_tts"
+   * @param success true if audio was produced (Kokoro WAV played or native speak() succeeded)
+   * @param reason null on success; short failure token on fallback
+   * @param latencyMs Kokoro synthesis latency (null when engine==native_tts)
+   * @param voiceId Kokoro voice ID that was selected
+   * @param soulId Soul that requested this utterance
+   * @param detail Extended error detail (null on success)
+   */
+  suspend fun pushTtsTelemetry(
+    engine: String,
+    success: Boolean,
+    reason: String?,
+    latencyMs: Long?,
+    voiceId: String,
+    soulId: String,
+    detail: String? = null
+  ): Boolean = withContext(Dispatchers.IO) {
+    if (!homeLinkEnabled) return@withContext false
+    try {
+      val payload = JSONObject().apply {
+        put("node", "phone-android")
+        put("engine", engine)
+        put("success", success)
+        put("voiceId", voiceId)
+        put("soulId", soulId)
+        reason?.let { put("reason", it) }
+        latencyMs?.let { put("latencyMs", it) }
+        detail?.let { put("detail", it) }
+        put("ts", System.currentTimeMillis())
+      }
+      val request = Request.Builder()
+        .url("$baseUrl/api/tts/routing")
+        .post(payload.toString().toRequestBody(jsonMedia))
+        .build()
+      client.newCall(request).execute().use { it.isSuccessful }
+    } catch (e: Exception) {
+      Log.w(TAG, "pushTtsTelemetry failed (offline?): ${e.message}")
+      false
     }
   }
 }
