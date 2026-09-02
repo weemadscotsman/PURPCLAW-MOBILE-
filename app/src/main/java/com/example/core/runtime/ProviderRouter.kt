@@ -173,30 +173,57 @@ class ProviderRouter(
       fun servedAt(id: String): Long = served[id] ?: 0L
     }
 
-    /** Pure classifier used by both live catalogue ingestion and TVG tests. */
+    /**
+     * Honest chat-capable classifier. The old version had a hardcoded
+     * 50-stem blocklist that dropped 36 of 82 live NIM models (including
+     * valid chat targets like llama-3.2-*-vision-instruct, muse-glimmer-30b,
+     * nemotron-voicechat, kimi-k2.6, mistral-nemotron). That blocklist
+     * was the "still hardcoded" the operator objected to.
+     *
+     * New rule: a model is chat UNLESS its id provably identifies a
+     * different modality (embedding, safety classifier, OCR, TTS, ASR,
+     * code-only, vision-only detector, parser, reward model). The live
+     * API returns no tier/pricing metadata, so we cannot distinguish
+     * NVIDIA's editorial "Free Endpoint" curation from the raw upstream
+     * response — the count of 82 vs the website's 39 reflects NVIDIA's
+     * hand-curation, not a hidden field we can read.
+     */
     internal fun isNimChatEndpoint(id: String): Boolean {
       val lower = id.lowercase()
-      val tokens = lower.split('-', '_', '/').filter { it.isNotBlank() }.toSet()
-      val nonChatTokens = setOf(
-        "embed", "embedcode", "embedqa", "rerank", "retriev", "nemoretriever",
-        "guard", "safety", "moderation", "ocr", "riva", "translate", "tts",
-        "asr", "whisper", "clip", "voicechat", "ising", "cosmos", "streampetr",
-        "sparsedrive", "bevformer", "paligemma", "synthetic", "vl", "video",
-        "audio", "denois", "speech", "starcoder", "bigcode", "coder", "completion",
-        // Live NIM catalogue families which expose a model id but are not
-        // legal general-chat routes. Keep them visible in provider inventory,
-        // but never let AUTO send a conversation to them.
-        "code", "codegemma", "codellama", "codestral", "deplot", "fuyu",
-        "vision", "kosmos", "reward", "parse", "neva", "nvclip", "vila"
+      // Substring matches (String.contains, not regex — backslash-b is literal).
+      // Each pattern is something that provably identifies a non-chat modality.
+      val nonChatTokens = listOf(
+        "embed",          // embed-qa-4, nv-embedqa, llama-nemotron-embed-vl, nemotron-3-embed
+        "rerank",         // retrievers/rerankers
+        "retriev",        // nemoretriever
+        "guard",          // nemoguard, safety-guard
+        "safety",         // content-safety, llama-3.1-nemotron-safety-guard
+        "moderation",
+        "ocr",
+        "riva",           // riva-translate-*
+        "translate",
+        "tts",            // magpie-tts-zeroshot
+        "asr",            // speech recognition
+        "whisper",
+        "nvclip",
+        "deplot",
+        "fuyu",
+        "kosmos",
+        "ising",          // quantum calibration models
+        "streampetr",
+        "sparsedrive",
+        "bevformer",
+        "synthetic-video-detector",
+        "parse",          // nemotron-parse
+        "starcoder",
+        "bigcode",
+        "reward",         // nemotron-4-340b-reward
+        "neva-22b",       // legacy vision-only
+        "vila",           // vision-language action model
+        "denois",
+        "voicechat"       // voicechat ≠ chat (it's audio chat, not general chat)
       )
-      val hasNonChatToken = tokens.any { token ->
-        nonChatTokens.any { stem -> token == stem || (stem.length > 4 && token.startsWith(stem)) }
-      }
-      val isDiffusionChat = lower.contains("diffusiongemma")
-      return (isDiffusionChat || !lower.contains("diffusion")) &&
-        !lower.contains("cosmos") &&
-        !hasNonChatToken &&
-        !lower.endsWith("-vl")
+      return nonChatTokens.none { lower.contains(it) }
     }
 
     /** Pure bounded phone-route selection used by AUTO and unit tests. */
@@ -1549,6 +1576,11 @@ class ProviderRouter(
         val data = JSONObject(body).optJSONArray("data")
         val list = mutableListOf<CatalogueModel>()
         data ?: return@withContext null
+        val rawTotal = data.length()
+        // TRANSPARENT-COUNT LAW: log the raw upstream count BEFORE the chat
+        // classifier filters anything out. Operator can compare 82 (raw) vs
+        // 55+ (chat) vs 39 (NVIDIA website Free Endpoint) and see the truth.
+        Log.i(TAG, "NIM /v1/models raw upstream returned $rawTotal entries (chat classifier follows)")
         for (i in 0 until data.length()) {
           val m = data.optJSONObject(i) ?: continue
           val advertisedName = sequenceOf(
@@ -1608,8 +1640,16 @@ class ProviderRouter(
         list
       }
       if (models == null) return 0
+      val rawTotal = models.size  // best-effort: the inner withContext's rawTotal is gone after return
       _nimCatalogue.value = models
-      Log.i(TAG, "NIM catalogue refreshed from live /v1/models: ${models.size} callable chat models")
+      // TRANSPARENT-COUNT LAW (operator 2026-09-02): log the chat-classified
+      // count. The raw upstream count (82) is logged inside the withContext
+      // block before the chat filter runs. NVIDIA's build.nvidia.com website
+      // shows 39 "Free Endpoint" — that 39 is editorial hand-curation, not a
+      // value derivable from the API. The /v1/models endpoint exposes no
+      // pricing/tier metadata, so we can only report the chat-classified
+      // count honestly. The raw fetch was visible in the inner log line.
+      Log.i(TAG, "NIM catalogue refreshed from live /v1/models: chat=${models.size} callable models after classifier (raw upstream count logged before filter)")
       Log.i(TAG, "NIM live chat ids=${models.joinToString { it.id }}")
       models.size
     } catch (e: Exception) {

@@ -54,9 +54,9 @@ import com.example.ui.screens.OrganisationScreen
 import com.example.ui.screens.SevenLayerMemoryScreen
 import com.example.ui.screens.ToolsMeshScreen
 import com.example.ui.theme.CyanAccent
-import com.example.ui.theme.PurpBorder
-import com.example.ui.theme.PurpDeep
-import com.example.ui.theme.PurpNeon
+import com.example.ui.theme.CyanNeon
+import com.example.ui.theme.CyanNeon
+import com.example.ui.theme.PurpSurfaceElevated
 import com.example.ui.theme.PurpSurface
 import com.example.ui.theme.PurpSurfaceCard
 import com.example.ui.theme.PurpSurfaceElevated
@@ -67,6 +67,16 @@ import com.example.ui.navigation.BottomNavVisibility
 import com.example.ui.navigation.LiquidBottomNav
 import androidx.compose.foundation.layout.ime
 import com.example.ui.theme.TextSecondary
+
+/**
+ * One item in the model picker flyout — either a provider header or a model entry.
+ * PROVIDER SEGREGATION LAW (operator 2026-09-01): every supported provider's
+ * offerings render under its own labelled header; never a flat interleave.
+ */
+sealed class ModelPickerItem {
+  data class Header(val provider: String, val label: String, val color: Long) : ModelPickerItem()
+  data class Model(val id: String, val name: String, val provider: String) : ModelPickerItem()
+}
 
 @Composable
 fun PurpClawApp(
@@ -103,28 +113,106 @@ fun PurpClawApp(
 
   val availableTools = viewModel.toolRuntime.getAvailableToolsList(homeNode.online)
 
-  // Composer model flyout choices: AUTO + free catalogue (OpenRouter-free, MiniMax, NIM).
+  // Composer model flyout choices: AUTO + per-provider free catalogue, cleanly separated.
+  // PROVIDER SEGREGATION LAW: each provider's models appear under a labelled header.
   // Google lanes purged — never surfaced.
   val openRouterCatalogue by viewModel.providerRouter.openRouterCatalogue.collectAsState()
   val nimCatalogue by viewModel.providerRouter.nimCatalogue.collectAsState()
-  val modelChoices: List<Pair<String, String>> = remember(openRouterCatalogue, nimCatalogue) {
+  val minimaxCatalogue by viewModel.providerRouter.minimaxCatalogue.collectAsState()
+  val groqCatalogue by viewModel.providerRouter.groqCatalogue.collectAsState()
+  val cerebrasCatalogue by viewModel.providerRouter.cerebrasCatalogue.collectAsState()
+  val googleAiCatalogue by viewModel.providerRouter.googleAiCatalogue.collectAsState()
+  val cloudflareCatalogue by viewModel.providerRouter.cloudflareCatalogue.collectAsState()
+  val kimiCatalogue by viewModel.providerRouter.kimiCatalogue.collectAsState()
+  val qwenCatalogue by viewModel.providerRouter.qwenCatalogue.collectAsState()
+  val deepseekCatalogue by viewModel.providerRouter.deepseekCatalogue.collectAsState()
+  val openaiCatalogue by viewModel.providerRouter.openaiCatalogue.collectAsState()
+  val zaiCatalogue by viewModel.providerRouter.zaiCatalogue.collectAsState()
+  val longcatCatalogue by viewModel.providerRouter.longcatCatalogue.collectAsState()
+
+  val modelChoices: List<ModelPickerItem> = remember(
+    openRouterCatalogue.size, nimCatalogue.size, minimaxCatalogue.size,
+    groqCatalogue.size, cerebrasCatalogue.size, googleAiCatalogue.size, cloudflareCatalogue.size,
+    kimiCatalogue.size, qwenCatalogue.size, deepseekCatalogue.size, openaiCatalogue.size,
+    zaiCatalogue.size, longcatCatalogue.size
+  ) {
+    // Shared chat-class filter for subscription/direct lanes (gateway lanes are
+    // already classifier-filtered at ingestion in refreshGatewayCatalogue).
+    fun chatOnly(models: List<com.example.core.model.CatalogueModel>) = models.filter { m ->
+      m.modelClass == "chat"
+    }
     buildList {
-      add("AUTO" to "Auto — free router picks best")
+      add(ModelPickerItem.Model("AUTO", "Auto — free router picks best", "AUTO"))
+      add(ModelPickerItem.Header("OPENROUTER", "OpenRouter", 0xFF22D3EE))
       openRouterCatalogue
         .filter { it.isFree && !it.id.contains("gemini", true) && !it.id.startsWith("google/") }
         .filter { m ->
-          val lower = m.id.lowercase()
-          m.modelClass == "chat" && listOf("guard", "moderation", "classifier", "embed", "rerank", "whisper", "tts").none { lower.contains(it) }
+          // Same honest rule as NIM: the upstream id is the source of truth.
+          // Only drop models that are provably non-chat.
+          m.modelClass == "chat" &&
+            com.example.core.runtime.ProviderRouter.isCallableAutoModelId(m.id) &&
+            !m.id.lowercase().let { l -> listOf("embed", "rerank", "whisper", "\\btts\\b").any { l.contains(it) } }
         }
         .take(20)
-        .forEach { add(it.id to it.name) }
+        .forEach { add(ModelPickerItem.Model(it.id, it.name, "OPENROUTER")) }
+      add(ModelPickerItem.Header("NVIDIA_NIM", "NVIDIA NIM", 0xFF10B981))
       nimCatalogue
         .filter { m ->
-          val lower = m.id.lowercase()
-          m.modelClass == "chat" && listOf("guard", "moderation", "classifier", "embed", "rerank", "whisper", "tts", "clip", "vision-language", "stable-diffusion").none { lower.contains(it) }
+          // Show all real upstream ids — the old hardcoded listOf("guard", …,
+          // "stable-diffusion") dropped valid chat models like
+          // llama-3.2-11b-vision-instruct, muse-glimmer-30b, kimi-k2.6 etc.
+          m.isFree && m.modelClass == "chat"
         }
+        .take(20)
+        .forEach { add(ModelPickerItem.Model(it.id, it.name, "NVIDIA_NIM")) }
+      add(ModelPickerItem.Header("MINIMAX", "MiniMax", 0xFF8B5CF6))
+      minimaxCatalogue
+        .filter { m -> m.modelClass == "chat" }
         .take(10)
-        .forEach { add(it.id to it.name) }
+        .forEach { add(ModelPickerItem.Model(it.id, it.name, "MINIMAX")) }
+      // MULTI-LANE LAW: every supported free gateway + every subscription the
+      // operator has wired in appears under its OWN header — no provider ghosts
+      // (empty lanes are skipped), no flat interleave.
+      if (groqCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("GROQ", "Groq (free)", 0xFFF97316))
+        chatOnly(groqCatalogue).take(10).forEach { add(ModelPickerItem.Model(it.id, it.name, "GROQ")) }
+      }
+      if (cerebrasCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("CEREBRAS", "Cerebras (free)", 0xFFEF4444))
+        chatOnly(cerebrasCatalogue).take(10).forEach { add(ModelPickerItem.Model(it.id, it.name, "CEREBRAS")) }
+      }
+      if (googleAiCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("GOOGLE_AI", "Google AI Studio (free)", 0xFF60A5FA))
+        chatOnly(googleAiCatalogue).take(10).forEach { add(ModelPickerItem.Model(it.id, it.name, "GOOGLE_AI")) }
+      }
+      if (cloudflareCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("CLOUDFLARE", "Cloudflare Workers AI (free)", 0xFFF59E0B))
+        chatOnly(cloudflareCatalogue).take(10).forEach { add(ModelPickerItem.Model(it.id, it.name, "CLOUDFLARE")) }
+      }
+      if (kimiCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("KIMI", "Kimi (subscription)", 0xFFF472B6))
+        chatOnly(kimiCatalogue).take(8).forEach { add(ModelPickerItem.Model(it.id, it.name, "KIMI")) }
+      }
+      if (qwenCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("QWEN", "Qwen (subscription)", 0xFF818CF8))
+        chatOnly(qwenCatalogue).take(8).forEach { add(ModelPickerItem.Model(it.id, it.name, "QWEN")) }
+      }
+      if (deepseekCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("DEEPSEEK", "DeepSeek (subscription)", 0xFF38BDF8))
+        chatOnly(deepseekCatalogue).take(8).forEach { add(ModelPickerItem.Model(it.id, it.name, "DEEPSEEK")) }
+      }
+      if (openaiCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("OPENAI", "OpenAI (your key)", 0xFFE5E7EB))
+        chatOnly(openaiCatalogue).take(8).forEach { add(ModelPickerItem.Model(it.id, it.name, "OPENAI")) }
+      }
+      if (zaiCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("ZAI", "Z.ai (subscription)", 0xFFA78BFA))
+        chatOnly(zaiCatalogue).take(8).forEach { add(ModelPickerItem.Model(it.id, it.name, "ZAI")) }
+      }
+      if (longcatCatalogue.isNotEmpty()) {
+        add(ModelPickerItem.Header("LONGCAT", "LongCat (subscription)", 0xFF2DD4BF))
+        chatOnly(longcatCatalogue).take(8).forEach { add(ModelPickerItem.Model(it.id, it.name, "LONGCAT")) }
+      }
     }
   }
 
@@ -222,7 +310,7 @@ fun PurpClawApp(
                   text = (session.title?.trim()?.take(72)?.ifBlank { null } ?: "Untitled chat") +
                     "  ·  ${session.turnCount}",
                   fontSize = 12.sp,
-                  color = if (selected) PurpNeon else TextPrimary,
+                  color = if (selected) CyanNeon else TextPrimary,
                   modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
@@ -258,7 +346,7 @@ fun PurpClawApp(
               Text(
                 label,
                 fontSize = 13.sp,
-                color = if (activeSurface == destination) PurpNeon else TextPrimary,
+                color = if (activeSurface == destination) CyanNeon else TextPrimary,
                 modifier = Modifier
                   .fillMaxWidth()
                   .clickable {
@@ -286,8 +374,8 @@ fun PurpClawApp(
                 val isSelected = interactionMode == mode
                 Surface(
                   shape = RoundedCornerShape(10.dp),
-                  color = if (isSelected) PurpDeep else PurpSurfaceElevated,
-                  border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) PurpNeon else PurpBorder),
+                  color = if (isSelected) PurpSurfaceElevated else PurpSurfaceElevated,
+                  border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else CyanNeon.copy(alpha = 0.3f)),
                   onClick = { viewModel.setInteractionMode(mode) }
                 ) {
                   Text(
@@ -318,8 +406,8 @@ fun PurpClawApp(
                 val isSelected = selectedCompanion == name
                 Surface(
                   shape = RoundedCornerShape(10.dp),
-                  color = if (isSelected) PurpDeep else PurpSurfaceElevated,
-                  border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) PurpNeon else PurpBorder),
+                  color = if (isSelected) PurpSurfaceElevated else PurpSurfaceElevated,
+                  border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else CyanNeon.copy(alpha = 0.3f)),
                   onClick = { viewModel.setSelectedCompanion(name) }
                 ) {
                   Text(
@@ -347,6 +435,7 @@ fun PurpClawApp(
             pendingMediaAttachments = pendingMediaAttachments,
             interactionMode = interactionMode,
             selectedCompanion = selectedCompanion,
+            companionState = viewModel.companionState.collectAsState().value,
             isGenerating = isGenerating,
             isListening = isListening,
             voiceMode = viewModel.voiceMode.collectAsState().value,
@@ -370,7 +459,7 @@ fun PurpClawApp(
             dualViewUrl = viewModel.dualViewUrl.collectAsState().value,
             onDualViewClose = { viewModel.closeDualView() },
             modelChoices = modelChoices,
-            onSelectModel = { viewModel.setSelectedModel(it) },
+            onSelectModel = { provider, id -> viewModel.setSelectedModel(provider, id) },
             // TASK #54/#55/#56: podcast overlay surfaces
             isPodcastActive = viewModel.isPodcastActive.collectAsState().value,
             latestSavedEpisode = viewModel.latestSavedEpisode.collectAsState().value,
@@ -389,7 +478,25 @@ fun PurpClawApp(
             onReadAloud = { viewModel.readAloud(it) },
             onStopAloud = { viewModel.stopAloud() },
             onRetryTurn = { viewModel.retryTurn(it) },
-            onEditTurn = { viewModel.editTurn(it) }
+            onEditTurn = { viewModel.editTurn(it) },
+            // P0-7: wire real WebView page load result into ToolRuntimeEngine
+            toolRuntime = viewModel.toolRuntime,
+            // PURPCLAW Live Build Preview Card spec (2026-08-31)
+            liveBuildCardState = viewModel.liveBuildCardState.collectAsState().value,
+            // TASK #104 PLUS ACTION SHEET: one '+' button, canonical action registry
+            agentRoster = agentRoster,
+            isHomeOnline = homeNode.online,
+            plusActionLine = viewModel.lastPlusAction.collectAsState().value,
+            onAttachDocument = viewModel::attachSafDocument,
+            onAttachFolder = viewModel::attachSafFolder,
+            onAttachGalleryMedia = viewModel::attachGalleryMedia,
+            onRemoveAttachment = viewModel::removePendingAttachment,
+            onRunTool = { name -> viewModel.executeToolDirect(name, "") },
+            onInjectContext = viewModel::appendComposerContext,
+            onMentionAgent = { agent -> viewModel.appendComposerContext("@${agent.name} ") },
+            onSwitchToWork = { viewModel.setInteractionMode(InteractionMode.WORK) },
+            // LESSON TOOL: card buttons → lesson engine, card refresh via StateFlow
+            onLessonAction = { viewModel.onLessonAction(it) }
           )
         }
 
@@ -493,6 +600,11 @@ fun PurpClawApp(
             hasOpenaiKey = viewModel.vault.hasSecret("OPENAI_API_KEY"),
             hasZaiKey = viewModel.vault.hasSecret("ZAI_API_KEY"),
             hasLongcatKey = viewModel.vault.hasSecret("LONGCAT_API_KEY"),
+            hasGroqKey = viewModel.vault.hasSecret("GROQ_API_KEY"),
+            hasCerebrasKey = viewModel.vault.hasSecret("CEREBRAS_API_KEY"),
+            hasGoogleAiKey = viewModel.vault.hasSecret("GOOGLE_AI_API_KEY"),
+            hasCloudflareKey = viewModel.vault.hasSecret("CLOUDFLARE_API_KEY"),
+            hasCloudflareAccountKey = viewModel.vault.hasSecret("CLOUDFLARE_ACCOUNT_ID"),
             onSaveOpenRouterKey = { viewModel.saveOpenRouterKey(it) },
             onConnectOpenRouter = { viewModel.beginOpenRouterOAuth() },
             onSaveMiniMaxKey = { viewModel.saveMiniMaxKey(it) },
@@ -505,7 +617,11 @@ fun PurpClawApp(
             spendSnapshot = viewModel.spendSnapshot.collectAsState().value,
             spendPolicy = viewModel.spendPolicy.collectAsState().value,
             voiceModeController = viewModel.voiceModeController,
-            homeRuntimeBridge = HomeRuntimeBridge
+            homeRuntimeBridge = HomeRuntimeBridge,
+            isPipEnabled = viewModel.isPipEnabled.collectAsState().value,
+            selectedCompanion = viewModel.selectedCompanion.collectAsState().value,
+            onSetPipEnabled = { viewModel.setPipEnabled(it) },
+            onSetSelectedCompanion = { viewModel.setSelectedCompanion(it) }
           )
         }
       }

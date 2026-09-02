@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.components.KaomojiSpinner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +29,10 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
@@ -104,16 +109,16 @@ import com.example.ui.theme.AmberHybrid
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldOnline
-import com.example.ui.theme.PurpBorder
-import com.example.ui.theme.PurpDeep
-import com.example.ui.theme.PurpNeon
-import com.example.ui.theme.PurpPrimary
+import com.example.ui.theme.CyanBorder
+
+
+
 import com.example.ui.theme.PurpSurface
 import com.example.ui.theme.PurpSurfaceCard
 import com.example.ui.theme.PurpSurfaceElevated
 import com.example.ui.theme.PurpVoid
 import com.example.ui.theme.RoseOffline
-import com.example.ui.theme.TextHighlight
+
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -131,6 +136,11 @@ fun AiModelsSettingsScreen(
   hasOpenaiKey: Boolean = false,
   hasZaiKey: Boolean = false,
   hasLongcatKey: Boolean = false,
+  hasGroqKey: Boolean = false,
+  hasCerebrasKey: Boolean = false,
+  hasGoogleAiKey: Boolean = false,
+  hasCloudflareKey: Boolean = false,
+  hasCloudflareAccountKey: Boolean = false,
   onSaveOpenRouterKey: (String) -> Unit,
   onConnectOpenRouter: () -> Unit = {},
   onSaveMiniMaxKey: (String) -> Unit,
@@ -142,6 +152,10 @@ fun AiModelsSettingsScreen(
   spendPolicy: SpendPolicy = SpendPolicy(),
   voiceModeController: VoiceModeController? = null,
   homeRuntimeBridge: HomeRuntimeBridge? = null,
+  isPipEnabled: Boolean = true,
+  selectedCompanion: String = "PurpAngolin",
+  onSetPipEnabled: (Boolean) -> Unit = {},
+  onSetSelectedCompanion: (String) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val routingState by providerRouter.routingState.collectAsState()
@@ -155,6 +169,10 @@ fun AiModelsSettingsScreen(
   val openaiCatalogue by providerRouter.openaiCatalogue.collectAsState()
   val zaiCatalogue by providerRouter.zaiCatalogue.collectAsState()
   val longcatCatalogue by providerRouter.longcatCatalogue.collectAsState()
+  val groqCatalogue by providerRouter.groqCatalogue.collectAsState()
+  val cerebrasCatalogue by providerRouter.cerebrasCatalogue.collectAsState()
+  val googleAiCatalogue by providerRouter.googleAiCatalogue.collectAsState()
+  val cloudflareCatalogue by providerRouter.cloudflareCatalogue.collectAsState()
   val coroutineScope = rememberCoroutineScope()
 
   var selectedSection by remember { mutableStateOf("LIBRARY") }
@@ -201,6 +219,7 @@ fun AiModelsSettingsScreen(
       // Section Navigation Tabs (Horizontal scrollable)
       val sections = listOf(
         Pair("LIBRARY", "Library"),
+        Pair("AVATAR", "Avatar"),
         Pair("SPEND", "Spend"),
         Pair("ROUTING", "Routing"),
         Pair("AUTO_CONTROLS", "AUTO Controls"),
@@ -226,8 +245,8 @@ fun AiModelsSettingsScreen(
               .clip(RoundedCornerShape(8.dp))
               .clickable { selectedSection = key }
               .testTag("ai_settings_tab_${key.lowercase()}"),
-            color = if (isSelected) PurpPrimary else PurpSurfaceElevated,
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) PurpNeon else PurpBorder)
+            color = if (isSelected) CyanNeon else PurpSurfaceElevated,
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else CyanBorder)
           ) {
             Text(
               text = label,
@@ -251,6 +270,12 @@ fun AiModelsSettingsScreen(
           .weight(1f)
       ) {
         when (selectedSection) {
+          "AVATAR" -> AvatarSection(
+            isPipEnabled = isPipEnabled,
+            selectedCompanion = selectedCompanion,
+            onSetPipEnabled = onSetPipEnabled,
+            onSetSelectedCompanion = onSetSelectedCompanion
+          )
           "LIBRARY" -> ProviderLibrarySection(
             openRouterCatalogue = catalogue,
             nimCatalogue = nimCatalogue,
@@ -261,6 +286,10 @@ fun AiModelsSettingsScreen(
             openaiCatalogue = openaiCatalogue,
             zaiCatalogue = zaiCatalogue,
             longcatCatalogue = longcatCatalogue,
+            groqCatalogue = groqCatalogue,
+            cerebrasCatalogue = cerebrasCatalogue,
+            googleAiCatalogue = googleAiCatalogue,
+            cloudflareCatalogue = cloudflareCatalogue,
             hasOpenRouterKey = hasOpenRouterKey,
             hasNimKey = hasNimKey,
             hasKimiKey = hasKimiKey,
@@ -269,6 +298,11 @@ fun AiModelsSettingsScreen(
             hasOpenaiKey = hasOpenaiKey,
             hasZaiKey = hasZaiKey,
             hasLongcatKey = hasLongcatKey,
+            hasGroqKey = hasGroqKey,
+            hasCerebrasKey = hasCerebrasKey,
+            hasGoogleAiKey = hasGoogleAiKey,
+            hasCloudflareKey = hasCloudflareKey,
+            hasCloudflareAccount = hasCloudflareAccountKey,
             hasMinimaxKey = hasMiniMaxKey,
             onRefreshGateway = { coroutineScope.launch { providerRouter.refreshOpenRouterCatalogue() } },
             onConnectOpenRouter = onConnectOpenRouter,
@@ -369,6 +403,11 @@ fun AiModelsSettingsScreen(
         "OPENAI_API_KEY" -> "OpenAI API Key Setup"
         "ZAI_API_KEY" -> "Z.ai (GLM) API Key Setup"
         "LONGCAT_API_KEY" -> "LongCat API Key Setup"
+        "GROQ_API_KEY" -> "Groq API Key Setup"
+        "CEREBRAS_API_KEY" -> "Cerebras API Key Setup"
+        "GOOGLE_AI_API_KEY" -> "Google AI Studio API Key Setup"
+        "CLOUDFLARE_API_KEY" -> "Cloudflare Workers AI API Key Setup"
+        "CLOUDFLARE_ACCOUNT_ID" -> "Cloudflare Account ID Setup"
         else -> "Provider API Key Setup"
       }
 
@@ -404,6 +443,11 @@ fun AiModelsSettingsScreen(
                 providerKey == "QWEN_API_KEY" -> "sk-..."
                 providerKey == "ZAI_API_KEY" -> "eyJ..."
                 providerKey == "LONGCAT_API_KEY" -> "ak-..."
+                providerKey == "GROQ_API_KEY" -> "gsk_..."
+                providerKey == "CEREBRAS_API_KEY" -> "csk-..."
+                providerKey == "GOOGLE_AI_API_KEY" -> "AIza..."
+                providerKey == "CLOUDFLARE_API_KEY" -> "Bearer token"
+                providerKey == "CLOUDFLARE_ACCOUNT_ID" -> "32-char account id"
                 else -> "secret"
               }) },
               singleLine = true,
@@ -411,8 +455,8 @@ fun AiModelsSettingsScreen(
                 .fillMaxWidth()
                 .testTag("api_key_input"),
               colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = PurpNeon,
-                unfocusedBorderColor = PurpBorder,
+                focusedBorderColor = CyanNeon,
+                unfocusedBorderColor = CyanBorder,
                 focusedTextColor = TextPrimary,
                 unfocusedTextColor = TextPrimary
               )
@@ -484,11 +528,11 @@ fun AiModelsSettingsScreen(
                 }
               }
             },
-            colors = ButtonDefaults.elevatedButtonColors(containerColor = PurpNeon, contentColor = Color.White),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
             modifier = Modifier.testTag("save_api_key_button")
           ) {
             if (isValidatingKey) {
-              CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+              KaomojiSpinner(pack = "skill_load", color = Color.White, fontSize = 11.sp)
             } else {
               Text("Save & Verify")
             }
@@ -526,9 +570,9 @@ fun AiModelsSettingsScreen(
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               if (model.isFree) TagChip("FREE", EmeraldOnline)
-              if (model.isToolCapable) TagChip("TOOLS", PurpNeon)
+              if (model.isToolCapable) TagChip("TOOLS", CyanNeon)
               if (model.isVisionCapable) TagChip("VISION", CyanAccent)
-              TagChip("${model.contextLength / 1024}K CTX", TextHighlight)
+              TagChip("${model.contextLength / 1024}K CTX", CyanNeon)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -606,10 +650,10 @@ fun AiModelsSettingsScreen(
                     isBenchmarking = false
                   }
                 },
-                colors = ButtonDefaults.elevatedButtonColors(containerColor = PurpPrimary)
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
               ) {
                 if (isBenchmarking) {
-                  CircularProgressIndicator(modifier = Modifier.size(12.dp), color = Color.White, strokeWidth = 2.dp)
+                  KaomojiSpinner(pack = "router_scan", color = Color.White, fontSize = 10.sp)
                 } else {
                   Text("Benchmark", fontSize = 10.sp)
                 }
@@ -656,8 +700,8 @@ private fun RoutingMainSection(
                 .clip(RoundedCornerShape(8.dp))
                 .clickable { onUpdateState { it.copy(modelMode = mode) } }
                 .testTag("mode_${mode.name.lowercase()}"),
-              color = if (isSelected) PurpNeon else PurpSurfaceElevated,
-              border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else PurpBorder)
+              color = if (isSelected) CyanNeon else PurpSurfaceElevated,
+              border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else CyanBorder)
             ) {
               Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -697,8 +741,8 @@ private fun RoutingMainSection(
                 .clip(RoundedCornerShape(8.dp))
                 .clickable { onUpdateState { it.copy(routingProfile = profile) } }
                 .testTag("profile_${profile.name.lowercase()}"),
-              color = if (isSelected) PurpPrimary else PurpSurfaceElevated,
-              border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) PurpNeon else PurpBorder)
+              color = if (isSelected) CyanNeon else PurpSurfaceElevated,
+              border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else CyanBorder)
             ) {
               Row(
                 modifier = Modifier.padding(10.dp),
@@ -742,8 +786,8 @@ private fun RoutingMainSection(
                 .clip(RoundedCornerShape(6.dp))
                 .clickable { onUpdateState { it.copy(reasoningEffort = effort) } }
                 .testTag("reasoning_${effort.name.lowercase()}"),
-              color = if (isSelected) PurpPrimary else PurpSurfaceElevated,
-              border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) PurpNeon else PurpBorder)
+              color = if (isSelected) CyanNeon else PurpSurfaceElevated,
+              border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) CyanNeon else CyanBorder)
             ) {
               Text(
                 text = effort.label,
@@ -767,7 +811,7 @@ private fun RoutingMainSection(
           checked = state.sessionAffinity,
           onCheckedChange = { onUpdateState { s -> s.copy(sessionAffinity = it) } }
         )
-        HorizontalDivider(color = PurpBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
+        HorizontalDivider(color = CyanBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
         ToggleRow(
           title = "FALLBACK ENABLED",
           description = "Automatic failover to next qualified candidate on timeout/error",
@@ -820,7 +864,7 @@ private fun AutoRoutingControlsSection(
           checked = state.qualityGateEnabled,
           onCheckedChange = { onUpdateState { s -> s.copy(qualityGateEnabled = it) } }
         )
-        HorizontalDivider(color = PurpBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
+        HorizontalDivider(color = CyanBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
         ToggleRow(
           title = "SESSION AFFINITY",
           description = "Clear affinity immediately on failure and elect new healthy winner",
@@ -857,14 +901,14 @@ private fun FreeModelRoutingSection(
           checked = state.freeModelsEnabled,
           onCheckedChange = { onUpdateState { s -> s.copy(freeModelsEnabled = it) } }
         )
-        HorizontalDivider(color = PurpBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
+        HorizontalDivider(color = CyanBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
         ToggleRow(
           title = "Prefer free models",
           description = "Route to free models before paid providers",
           checked = state.preferFreeModels,
           onCheckedChange = { onUpdateState { s -> s.copy(preferFreeModels = it) } }
         )
-        HorizontalDivider(color = PurpBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
+        HorizontalDivider(color = CyanBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
         ToggleRow(
           title = "Free-only mode",
           description = "Strictly reject all paid models",
@@ -889,8 +933,8 @@ private fun FreeModelRoutingSection(
                 modifier = Modifier
                   .clip(RoundedCornerShape(4.dp))
                   .clickable { onUpdateState { s -> s.copy(minFreeContextK = k) } },
-                color = if (isSel) PurpNeon else PurpSurfaceElevated,
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) CyanNeon else PurpBorder)
+                color = if (isSel) CyanNeon else PurpSurfaceElevated,
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) CyanNeon else CyanBorder)
               ) {
                 Text(
                   "${k}K",
@@ -978,13 +1022,13 @@ private fun OpenRouterSection(
         ) {
           Column {
             Text(
-              text = if (hasKey) "Status: ONLINE" else "Status: DEGRADED / UNCONFIGURED",
+              text = if (hasKey) "Status: ONLINE · KEY REQUIRED" else "Status: FREE TIER ACTIVE · NO KEY",
               fontSize = 12.sp,
               fontWeight = FontWeight.Bold,
-              color = if (hasKey) EmeraldOnline else RoseOffline
+              color = if (hasKey) EmeraldOnline else CyanAccent
             )
             Text(
-              text = if (hasKey) "Credential: Ingested in Keystore Vault" else "Credential: Missing (Free models only)",
+              text = if (hasKey) "Credential: Ingested in Keystore Vault" else "Free models work without key · paid models need key",
               fontSize = 10.sp,
               color = TextSecondary
             )
@@ -997,21 +1041,28 @@ private fun OpenRouterSection(
             }
             ElevatedButton(
               onClick = onOpenKeyDialog,
-              colors = ButtonDefaults.elevatedButtonColors(containerColor = PurpNeon)
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
             ) {
               Text(if (hasKey) "Update Key" else "Enter API Key", fontSize = 10.sp, color = Color.White)
             }
           }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = "base: https://openrouter.ai/api/v1 · OPENROUTER_API_KEY",
+          fontSize = 9.sp,
+          fontFamily = FontFamily.Monospace,
+          color = TextMuted
+        )
+        Spacer(modifier = Modifier.height(4.dp))
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
           Text("Catalogue: ${catalogue.size} models", fontSize = 10.sp, color = TextMuted)
           Text("Free qualified: ${catalogue.count { it.isQualifiedFree }}", fontSize = 10.sp, color = EmeraldOnline)
-          Text("Tools: ${catalogue.count { it.isToolCapable }}", fontSize = 10.sp, color = PurpNeon)
+          Text("Tools: ${catalogue.count { it.isToolCapable }}", fontSize = 10.sp, color = CyanNeon)
           Text("Vision: ${catalogue.count { it.isVisionCapable }}", fontSize = 10.sp, color = CyanAccent)
         }
 
@@ -1031,15 +1082,15 @@ private fun OpenRouterSection(
       OutlinedTextField(
         value = searchQuery,
         onValueChange = { searchQuery = it },
-        placeholder = { Text("Search 400+ models (e.g. llama, deepseek, flash)...") },
+        placeholder = { Text("Search ${catalogue.size} models (e.g. llama, deepseek, flash)...") },
         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted) },
         singleLine = true,
         modifier = Modifier
           .fillMaxWidth()
           .testTag("model_search_input"),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = PurpNeon,
-          unfocusedBorderColor = PurpBorder,
+          focusedBorderColor = CyanNeon,
+          unfocusedBorderColor = CyanBorder,
           focusedTextColor = TextPrimary,
           unfocusedTextColor = TextPrimary
         )
@@ -1063,7 +1114,7 @@ private fun OpenRouterSection(
           selected = filterToolsOnly,
           onClick = { filterToolsOnly = !filterToolsOnly },
           label = { Text("Tools") },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PurpNeon)
+          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanNeon)
         )
         FilterChip(
           selected = filterVisionOnly,
@@ -1088,7 +1139,7 @@ private fun OpenRouterSection(
           .clickable { onSelectModel(model) }
           .testTag("model_row_${model.id}"),
         color = PurpSurfaceCard,
-        border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+        border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
       ) {
         Column(modifier = Modifier.padding(10.dp)) {
           Row(
@@ -1121,7 +1172,7 @@ private fun OpenRouterSection(
           Spacer(modifier = Modifier.height(6.dp))
           Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (model.isFree) TagChip("FREE", EmeraldOnline)
-            if (model.isToolCapable) TagChip("TOOLS", PurpNeon)
+            if (model.isToolCapable) TagChip("TOOLS", CyanNeon)
             if (model.isVisionCapable) TagChip("VISION", CyanAccent)
             if (model.isReasoningCapable) TagChip("REASONING", AmberHybrid)
             TagChip("${model.contextLength / 1024}K CTX", TextSecondary)
@@ -1164,8 +1215,9 @@ private fun NimSection(
               color = if (hasKey) EmeraldOnline else RoseOffline
             )
             Text(
-              text = "integrate.api.nvidia.com/v1 · free tier · OpenAI-compatible",
+              text = "base: https://integrate.api.nvidia.com/v1 · NVIDIA_NIM_API_KEY · free tier",
               fontSize = 9.5.sp,
+              fontFamily = FontFamily.Monospace,
               color = TextSecondary
             )
           }
@@ -1175,7 +1227,7 @@ private fun NimSection(
             }
             ElevatedButton(
               onClick = onOpenKeyDialog,
-              colors = ButtonDefaults.elevatedButtonColors(containerColor = PurpNeon)
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
             ) {
               Text(if (hasKey) "Update Key" else "Set Key", fontSize = 10.sp, color = Color.White)
             }
@@ -1195,7 +1247,7 @@ private fun NimSection(
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,
           fontFamily = FontFamily.Monospace,
-          color = TextHighlight
+          color = CyanNeon
         )
         OutlinedButton(onClick = onRefresh, enabled = hasKey) {
           Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -1276,8 +1328,9 @@ private fun MiniMaxSection(
               color = if (hasKey) EmeraldOnline else RoseOffline
             )
             Text(
-              text = "Disaggregated capability health status",
+              text = "base: https://api.minimax.io/v1 · MINIMAX_API_KEY · BYO subscription",
               fontSize = 9.5.sp,
+              fontFamily = FontFamily.Monospace,
               color = TextSecondary
             )
           }
@@ -1287,7 +1340,7 @@ private fun MiniMaxSection(
             }
             ElevatedButton(
               onClick = onOpenKeyDialog,
-              colors = ButtonDefaults.elevatedButtonColors(containerColor = PurpNeon)
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
             ) {
               Text(if (hasKey) "Update Key" else "Set Key", fontSize = 10.sp, color = Color.White)
             }
@@ -1302,14 +1355,14 @@ private fun MiniMaxSection(
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         fontFamily = FontFamily.Monospace,
-        color = TextHighlight
+        color = CyanNeon
       )
     }
 
     item {
       CapabilityStatusCard(
-        title = "Text / Reasoning (ABAB 6.5s)",
-        description = "Large language model with tool calling & dialogue",
+        title = "Text / Reasoning (MiniMax-M3 / M2.7)",
+        description = "api.minimax.io/v1/chat/completions · OpenAI-compatible",
         status = status.textReasoning,
         icon = Icons.Default.Code
       )
@@ -1317,8 +1370,8 @@ private fun MiniMaxSection(
 
     item {
       CapabilityStatusCard(
-        title = "Speech Synthesis (t2a_v2 / Speech-01)",
-        description = "High fidelity neural voice streaming",
+        title = "Speech Synthesis (speech-02-turbo)",
+        description = "api.minimax.io/v1/t2a_v2 · synchronous neural voice",
         status = status.speech,
         icon = Icons.Default.Mic
       )
@@ -1326,8 +1379,8 @@ private fun MiniMaxSection(
 
     item {
       CapabilityStatusCard(
-        title = "Video Generation (video-01)",
-        description = "Asynchronous generative video synthesis task queue",
+        title = "Video Generation (MiniMax-H3)",
+        description = "api.minimax.io/v2/video_generation · async, poll via /v2/query/video_generation/{id}",
         status = status.video,
         icon = Icons.Default.Videocam
       )
@@ -1335,8 +1388,8 @@ private fun MiniMaxSection(
 
     item {
       CapabilityStatusCard(
-        title = "Music Generation (music-01)",
-        description = "Song and backing track audio composition",
+        title = "Music Generation (music-3.0)",
+        description = "api.minimax.io/v1/music_generation · vocal / instrumental / cover",
         status = status.music,
         icon = Icons.Default.MusicNote
       )
@@ -1390,7 +1443,7 @@ private fun LocalAndroidModelsSection(
         modifier = Modifier.fillMaxWidth(),
         color = PurpSurfaceCard,
         shape = RoundedCornerShape(8.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+        border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
       ) {
         Column(modifier = Modifier.padding(12.dp)) {
           Row(
@@ -1435,9 +1488,9 @@ private fun LocalAndroidModelsSection(
             ElevatedButton(
               onClick = {
                 // REAL ACTION: show exact adb command for this device
-                importMessage = "adb push gemma.gguf /data/data/com.aistudio.purpclaw.osv7/files/models/"
+                importMessage = "adb push gemma.gguf /data/data/com.purpclaw.osv7/files/models/"
               },
-              colors = ButtonDefaults.elevatedButtonColors(containerColor = PurpPrimary)
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon)
             ) {
               Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
               Spacer(modifier = Modifier.width(4.dp))
@@ -1463,17 +1516,17 @@ private fun HomePcRoutingSection(
     verticalArrangement = Arrangement.spacedBy(10.dp)
   ) {
     item {
-      SectionCard(title = "HOME PURPCLAW WORKSTATION", icon = Icons.Default.Computer) {
+      SectionCard(title = "HOME PC LINK (transport, NOT an AI provider)", icon = Icons.Default.Computer) {
         ToggleRow(
-          title = "Use Home routing",
-          description = "When attached, Home ProviderRouter is authority. Phone displays Home state without re-running AUTO",
+          title = "Use Home link",
+          description = "When attached, Home PC is the routing destination for chat/voice/work. Phone displays Home state without re-running AUTO. This is a transport link to your own PC, not a model provider.",
           checked = state.useHomeRouting,
           onCheckedChange = { onUpdateState { s -> s.copy(useHomeRouting = it) } }
         )
-        HorizontalDivider(color = PurpBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
+        HorizontalDivider(color = CyanBorder, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 6.dp))
         ToggleRow(
           title = "Prefer Home compute",
-          description = "Route heavy reasoning and tool workflows to Home Rig hardware",
+          description = "Route heavy reasoning and tool workflows to Home Rig hardware. Same link — just opt-in for the expensive turns.",
           checked = state.preferHomeCompute,
           onCheckedChange = { onUpdateState { s -> s.copy(preferHomeCompute = it) } }
         )
@@ -1481,13 +1534,13 @@ private fun HomePcRoutingSection(
     }
 
     item {
-      SectionCard(title = "HOME ROUTING STATE", icon = Icons.Default.Info) {
+      SectionCard(title = "HOME LINK STATE", icon = Icons.Default.Info) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-          Text("Home Provider: ${state.homeProvider}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = TextPrimary)
+          Text("Home PC connection: ${state.homeProvider}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = TextPrimary)
           Text("Resolved: Home PC · ${state.homeResolvedModel ?: "pending core report"}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = EmeraldOnline)
           Spacer(modifier = Modifier.height(4.dp))
           Text(
-            text = "DEFAULT LAW: When Home is online, Home ProviderRouter is authority. When Home dies, LOCAL TAKEOVER activates Android ProviderRouter seamlessly.",
+            text = "TRANSPORT LAW: Home is a link, not a provider. When Home is online, traffic flows through it; when Home dies, LOCAL TAKEOVER activates Android ProviderRouter. Model selection still uses the live /v1/models catalog from the configured provider.",
             fontSize = 9.5.sp,
             fontFamily = FontFamily.Monospace,
             color = TextMuted
@@ -1511,14 +1564,14 @@ private fun SectionCard(
     modifier = Modifier.fillMaxWidth(),
     colors = CardDefaults.cardColors(containerColor = PurpSurfaceCard),
     shape = RoundedCornerShape(8.dp),
-    border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
   ) {
     Column(modifier = Modifier.padding(12.dp)) {
       Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(bottom = 8.dp)
       ) {
-        Icon(icon, contentDescription = null, tint = PurpNeon, modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
         Spacer(modifier = Modifier.width(6.dp))
         Text(
           text = title,
@@ -1554,7 +1607,7 @@ private fun ToggleRow(
       onCheckedChange = onCheckedChange,
       colors = SwitchDefaults.colors(
         checkedThumbColor = Color.White,
-        checkedTrackColor = PurpNeon,
+        checkedTrackColor = CyanNeon,
         uncheckedThumbColor = TextMuted,
         uncheckedTrackColor = PurpSurfaceElevated
       )
@@ -1579,9 +1632,9 @@ private fun CheckboxRow(
       checked = checked,
       onCheckedChange = onCheckedChange,
       colors = CheckboxDefaults.colors(
-        checkedColor = PurpNeon,
+        checkedColor = CyanNeon,
         checkmarkColor = Color.White,
-        uncheckedColor = PurpBorder
+        uncheckedColor = CyanBorder
       )
     )
     Spacer(modifier = Modifier.width(4.dp))
@@ -1603,7 +1656,7 @@ private fun ModelRowCard(
       .fillMaxWidth()
       .clip(RoundedCornerShape(6.dp)),
     color = PurpSurfaceElevated,
-    border = androidx.compose.foundation.BorderStroke(1.dp, if (isQualified) PurpBorder else RoseOffline.copy(alpha = 0.5f))
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (isQualified) CyanBorder else RoseOffline.copy(alpha = 0.5f))
   ) {
     Column(modifier = Modifier.padding(8.dp)) {
       Row(
@@ -1671,7 +1724,7 @@ private fun CapabilityStatusCard(
     modifier = Modifier.fillMaxWidth(),
     color = PurpSurfaceCard,
     shape = RoundedCornerShape(6.dp),
-    border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
   ) {
     Row(
       modifier = Modifier.padding(10.dp),
@@ -1679,7 +1732,7 @@ private fun CapabilityStatusCard(
       horizontalArrangement = Arrangement.SpaceBetween
     ) {
       Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-        Icon(icon, contentDescription = null, tint = PurpNeon, modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
         Spacer(modifier = Modifier.width(8.dp))
         Column {
           Text(title, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -1706,6 +1759,148 @@ private fun TagChip(text: String, color: Color) {
 }
 
 // =====================================================================================
+// =====================================================================================
+// Avatar / PiP section — Mochi swap and PiP on/off.
+// =====================================================================================
+
+@Composable
+private fun AvatarSection(
+  isPipEnabled: Boolean,
+  selectedCompanion: String,
+  onSetPipEnabled: (Boolean) -> Unit,
+  onSetSelectedCompanion: (String) -> Unit
+) {
+  val companions = listOf(
+    Pair("PurpAngolin", Icons.Filled.Pets),
+    Pair("Babshaggoth", Icons.Filled.LocalFireDepartment),
+    Pair("Lyra Voice", Icons.Filled.Mic),
+    Pair("PurpReaper", Icons.Filled.Warning)
+  )
+
+  LazyColumn(
+    modifier = Modifier.fillMaxSize(),
+    verticalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    // ── PiP master toggle ──────────────────────────────────────────────────────
+    item {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = PurpSurfaceCard),
+        shape = RoundedCornerShape(12.dp)
+      ) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = "Floating PiP Overlay",
+              fontSize = 14.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary
+            )
+            Text(
+              text = "Show Mochi as draggable PiP when app goes to background",
+              fontSize = 11.sp,
+              color = TextSecondary
+            )
+          }
+          Spacer(modifier = Modifier.width(12.dp))
+          Switch(
+            checked = isPipEnabled,
+            onCheckedChange = onSetPipEnabled,
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = CyanNeon,
+              checkedTrackColor = CyanNeon
+            )
+          )
+        }
+      }
+    }
+
+    // ── Section header ─────────────────────────────────────────────────────────
+    item {
+      Text(
+        text = "SELECT COMPANION / MOCHI",
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Black,
+        letterSpacing = 1.sp,
+        color = CyanAccent,
+        modifier = Modifier.padding(top = 8.dp)
+      )
+      Text(
+        text = "Tap to swap — selection persists across sessions",
+        fontSize = 10.sp,
+        color = TextMuted
+      )
+    }
+
+    // ── Companion rows ─────────────────────────────────────────────────────────
+    items(companions.size) { index ->
+      val (name, emoji) = companions[index]
+      val isSelected = name == selectedCompanion
+
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable { onSetSelectedCompanion(name) },
+        colors = CardDefaults.cardColors(
+          containerColor = if (isSelected) PurpSurfaceElevated else PurpSurfaceCard
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, CyanNeon) else null
+      ) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            imageVector = emoji,
+            contentDescription = name,
+            modifier = Modifier.size(28.dp),
+            tint = if (isSelected) CyanNeon else TextMuted
+          )
+          Spacer(modifier = Modifier.width(14.dp))
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = name,
+              fontSize = 15.sp,
+              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+              color = if (isSelected) CyanNeon else TextPrimary
+            )
+            Text(
+              text = when (name) {
+                "PurpAngolin" -> "Dragon companion — full 3D avatar"
+                "Babshaggoth" -> "Monster companion — full 3D avatar"
+                "Lyra Voice" -> "Voice-native companion — audio-first"
+                "PurpReaper" -> "Grim companion — thinking spinner, retry & recovery loops"
+                else -> ""
+              },
+              fontSize = 10.5.sp,
+              color = TextSecondary
+            )
+          }
+          if (isSelected) {
+            Icon(
+              Icons.Default.Check,
+              contentDescription = "Selected",
+              tint = CyanNeon,
+              modifier = Modifier.size(20.dp)
+            )
+          }
+        }
+      }
+    }
+
+    item { Spacer(modifier = Modifier.height(16.dp)) }
+  }
+}
+
 // PROVIDER LIBRARY — provider-law 2026-08-26
 //
 // Two clearly-separated sections:
@@ -1731,6 +1926,10 @@ private fun ProviderLibrarySection(
   openaiCatalogue: List<CatalogueModel>,
   zaiCatalogue: List<CatalogueModel>,
   longcatCatalogue: List<CatalogueModel>,
+  groqCatalogue: List<CatalogueModel>,
+  cerebrasCatalogue: List<CatalogueModel>,
+  googleAiCatalogue: List<CatalogueModel>,
+  cloudflareCatalogue: List<CatalogueModel>,
   hasOpenRouterKey: Boolean,
   hasNimKey: Boolean,
   hasMinimaxKey: Boolean,
@@ -1740,6 +1939,11 @@ private fun ProviderLibrarySection(
   hasOpenaiKey: Boolean,
   hasZaiKey: Boolean,
   hasLongcatKey: Boolean,
+  hasGroqKey: Boolean,
+  hasCerebrasKey: Boolean,
+  hasGoogleAiKey: Boolean,
+  hasCloudflareKey: Boolean,
+  hasCloudflareAccount: Boolean,
   onRefreshGateway: () -> Unit,
   onConnectOpenRouter: () -> Unit,
   onRefreshNim: () -> Unit,
@@ -1749,7 +1953,34 @@ private fun ProviderLibrarySection(
   onPinModel: (String) -> Unit,
   providerRouter: ProviderRouter
 ) {
-  val freePool = providerRouter.queryAllFreeGateways()
+  // openrouter/free is a meta-router, not returned by the /v1/models catalogue.
+  // Surface it here so users can select it explicitly in AUTO mode.
+  val freePool = buildList {
+    if (hasOpenRouterKey) {
+      add(
+        CatalogueModel(
+          id = "openrouter/free",
+          name = "Free Models Router",
+          provider = "openrouter",
+          providerType = ProviderType.GATEWAY,
+          sourceProvider = "openrouter",
+          description = "Smart router — selects free models at random from OpenRouter's free tier. Filters for image understanding, tool calling, structured outputs, and more.",
+          contextLength = 0,
+          isFree = true,
+          isToolCapable = true,
+          isVisionCapable = true,
+          isReasoningCapable = true,
+          modelClass = "chat",
+          avgLatencyMs = 0,
+          healthStatus = "HEALTHY",
+          pricingPrompt = 0.0,
+          pricingCompletion = 0.0,
+          isQualifiedFree = true
+        )
+      )
+    }
+    addAll(providerRouter.queryAllFreeGateways())
+  }
   val directPool = providerRouter.queryAllDirect()
   var freeExpanded by remember { mutableStateOf(true) }
   var directExpanded by remember { mutableStateOf(false) }
@@ -1828,7 +2059,7 @@ private fun ProviderLibrarySection(
           name = "NVIDIA NIM",
           baseUrl = "integrate.api.nvidia.com",
           hasKey = hasNimKey,
-          modelCount = nimCatalogue.size,
+          modelCount = nimCatalogue.count { it.isFree && it.id.startsWith("nvidia/") }, // Only nvidia/… namespace is free tier
           onRefresh = onRefreshNim,
           onConnect = null,
           onOpenKeyDialog = { onOpenKeyDialog("NVIDIA_NIM_API_KEY", "NVIDIA NIM API Key") },
@@ -1956,6 +2187,62 @@ private fun ProviderLibrarySection(
           onSelectModel = onSelectModel
         )
       }
+      // MULTI-LANE LAW (2026-09-01): every configured free gateway rotates in
+      // AUTO. These four lanes are gateways (free tier, OpenAI-compatible),
+      // rendered with the direct tile because they are single-key lanes here.
+      item {
+        DirectProviderTile(
+          source = ProviderSource.GROQ,
+          hasKey = hasGroqKey,
+          catalogue = groqCatalogue,
+          onOpenKeyDialog = { onOpenKeyDialog("GROQ_API_KEY", "Groq API Key") },
+          onClearKey = { onClearKey("GROQ_API_KEY") },
+          onSelectModel = onSelectModel
+        )
+      }
+      item {
+        DirectProviderTile(
+          source = ProviderSource.CEREBRAS,
+          hasKey = hasCerebrasKey,
+          catalogue = cerebrasCatalogue,
+          onOpenKeyDialog = { onOpenKeyDialog("CEREBRAS_API_KEY", "Cerebras API Key") },
+          onClearKey = { onClearKey("CEREBRAS_API_KEY") },
+          onSelectModel = onSelectModel
+        )
+      }
+      item {
+        DirectProviderTile(
+          source = ProviderSource.GOOGLE_AI,
+          hasKey = hasGoogleAiKey,
+          catalogue = googleAiCatalogue,
+          onOpenKeyDialog = { onOpenKeyDialog("GOOGLE_AI_API_KEY", "Google AI Studio API Key") },
+          onClearKey = { onClearKey("GOOGLE_AI_API_KEY") },
+          onSelectModel = onSelectModel
+        )
+      }
+      item {
+        DirectProviderTile(
+          source = ProviderSource.CLOUDFLARE,
+          hasKey = hasCloudflareKey,
+          catalogue = cloudflareCatalogue,
+          onOpenKeyDialog = { onOpenKeyDialog("CLOUDFLARE_API_KEY", "Cloudflare Workers AI API Key") },
+          onClearKey = { onClearKey("CLOUDFLARE_API_KEY") },
+          onSelectModel = onSelectModel
+        )
+      }
+      // Cloudflare additionally requires the account id for its effective base
+      // URL (/client/v4/accounts/{id}/ai/v1). Separate vault secret, same
+      // generic isDirect save path — no API semantics attached.
+      item {
+        VaultSecretTile(
+          title = "Cloudflare Account ID",
+          subtitle = "required with the API key for /accounts/{id}/ai/v1",
+          secretName = "CLOUDFLARE_ACCOUNT_ID",
+          hasSecret = hasCloudflareAccount,
+          onOpenKeyDialog = onOpenKeyDialog,
+          onClearKey = onClearKey
+        )
+      }
     }
   }
 }
@@ -1975,7 +2262,7 @@ private fun FreeGatewayTile(
     modifier = Modifier.fillMaxWidth(),
     color = PurpSurface,
     shape = RoundedCornerShape(6.dp),
-    border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
   ) {
     Row(
       modifier = Modifier.padding(10.dp).fillMaxWidth(),
@@ -2001,8 +2288,8 @@ private fun FreeGatewayTile(
         }
         ElevatedButton(
           onClick = onOpenKeyDialog,
-          colors = ButtonDefaults.elevatedButtonColors(containerColor = if (hasKey) PurpPrimary else PurpNeon)
-        ) { Text(if (hasKey) "Update Key" else "Add API Key", fontSize = 10.sp, color = Color.White) }
+          colors = ButtonDefaults.textButtonColors(contentColor = CyanNeon)
+        ) { Text(if (hasKey) "Update Key" else "Add API Key", fontSize = 10.sp) }
       }
     }
   }
@@ -2023,7 +2310,7 @@ private fun DirectProviderTile(
       .fillMaxWidth()
       .clip(RoundedCornerShape(6.dp)),
     color = PurpSurface,
-    border = androidx.compose.foundation.BorderStroke(1.dp, if (hasKey) AmberHybrid else PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (hasKey) AmberHybrid else CyanBorder)
   ) {
     Column(modifier = Modifier.padding(10.dp)) {
       Row(
@@ -2047,8 +2334,8 @@ private fun DirectProviderTile(
           }
           ElevatedButton(
             onClick = onOpenKeyDialog,
-            colors = ButtonDefaults.elevatedButtonColors(containerColor = if (hasKey) PurpPrimary else PurpNeon)
-          ) { Text(if (hasKey) "Update Key" else "Add API Key", fontSize = 10.sp, color = Color.White) }
+            colors = ButtonDefaults.textButtonColors(contentColor = CyanNeon)
+          ) { Text(if (hasKey) "Update Key" else "Add API Key", fontSize = 10.sp) }
         }
       }
       if (expanded && hasKey && catalogue.isNotEmpty()) {
@@ -2059,6 +2346,49 @@ private fun DirectProviderTile(
         if (catalogue.size > 8) {
           Text("+ ${catalogue.size - 8} more", fontSize = 9.sp, color = TextMuted)
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun VaultSecretTile(
+  title: String,
+  subtitle: String,
+  secretName: String,
+  hasSecret: Boolean,
+  onOpenKeyDialog: (vaultKey: String, label: String) -> Unit,
+  onClearKey: (String) -> Unit
+) {
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(6.dp)),
+    color = PurpSurface,
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (hasSecret) EmeraldOnline else CyanBorder)
+  ) {
+    Row(
+      modifier = Modifier.padding(10.dp).fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Text(subtitle, fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = TextMuted)
+        Text(
+          text = if (hasSecret) "configured" else "missing — Cloudflare lane stays unconfigured",
+          fontSize = 9.5.sp,
+          color = if (hasSecret) EmeraldOnline else TextSecondary
+        )
+      }
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (hasSecret) {
+          OutlinedButton(onClick = { onClearKey(secretName) }) { Text("Clear", fontSize = 10.sp, color = RoseOffline) }
+        }
+        ElevatedButton(
+          onClick = { onOpenKeyDialog(secretName, title) },
+          colors = ButtonDefaults.textButtonColors(contentColor = CyanNeon)
+        ) { Text(if (hasSecret) "Update" else "Add", fontSize = 10.sp) }
       }
     }
   }
@@ -2090,7 +2420,7 @@ private fun FreeModelRow(model: CatalogueModel, onClick: () -> Unit) {
       .clip(RoundedCornerShape(6.dp))
       .clickable { onClick() },
     color = PurpSurfaceElevated,
-    border = androidx.compose.foundation.BorderStroke(1.dp, PurpBorder)
+    border = androidx.compose.foundation.BorderStroke(1.dp, CyanBorder)
   ) {
     Row(
       modifier = Modifier.padding(8.dp).fillMaxWidth(),
@@ -2107,7 +2437,7 @@ private fun FreeModelRow(model: CatalogueModel, onClick: () -> Unit) {
         )
       }
       Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        if (model.isToolCapable) TagChip("TOOLS", PurpNeon)
+        if (model.isToolCapable) TagChip("TOOLS", CyanNeon)
         if (model.isVisionCapable) TagChip("VISION", CyanAccent)
         if (model.isReasoningCapable) TagChip("REASONING", AmberHybrid)
         TagChip("FREE", EmeraldOnline)
@@ -2151,8 +2481,8 @@ private fun SpendSection(
               .padding(vertical = 3.dp)
               .clip(RoundedCornerShape(6.dp))
               .clickable { onUpdatePolicy(policy.copy(mode = mode)) },
-            color = if (isSel) PurpPrimary else PurpSurfaceElevated,
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) PurpNeon else PurpBorder)
+            color = if (isSel) CyanNeon else PurpSurfaceElevated,
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) CyanNeon else CyanBorder)
           ) {
             Column(modifier = Modifier.padding(8.dp)) {
               Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else TextPrimary)
@@ -2221,8 +2551,8 @@ private fun SpendLimitField(
       enabled = enabled,
       modifier = Modifier.width(110.dp),
       colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = PurpNeon,
-        unfocusedBorderColor = PurpBorder,
+        focusedBorderColor = CyanNeon,
+        unfocusedBorderColor = CyanBorder,
         focusedTextColor = TextPrimary,
         unfocusedTextColor = TextPrimary
       )
