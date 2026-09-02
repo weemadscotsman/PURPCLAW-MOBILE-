@@ -42,7 +42,8 @@ data class ProviderExecutionResult(
   val errorMessage: String? = null,
   val statusCode: Int? = null,           // HTTP status code if available (e.g. 429, 502, 404)
   val routingReceipt: RoutingReceipt? = null,
-  val toolCalls: List<CanonicalToolCall> = emptyList()
+  val toolCalls: List<CanonicalToolCall> = emptyList(),
+  val reasoning: String? = null          // model thinking — rendered in the status box, never in chat text
 )
 
 data class MiniMaxMediaResult(
@@ -91,12 +92,10 @@ class ProviderRouter(
     private const val KEY_MODEL = "pinned_model"
     // Cost incident 2026-09-01: AUTO is fail-closed away from OpenRouter
     // until its account-side charged route is independently reconciled.
-    // Manual explicit :free picks remain executable; paid/unknown ids are
-    // rejected by callOpenRouter before a network request is created.
-    // The live account showed unexpected OpenRouter spend. AUTO therefore stays
-    // fail-closed until an independent cost audit proves the account-side route.
-    // Manual, explicitly selected zero-price routes remain available.
-    private const val OPENROUTER_AUTO_COST_HOLD = true
+    // NO HARDCODED AUTO EXCLUSION (operator 2026-09-02): every configured gateway
+    // joins the AUTO pool. No provider is held out at the source-code level.
+    // If a lane misbehaves, quarantine it through the live health cache at
+    // runtime — the catalogue is the source of truth, not a build-time list.
     private val UUID_MODEL_ID = Regex(
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
     )
@@ -126,6 +125,52 @@ class ProviderRouter(
         "completion", "bge", "m2m100"
       )
       return tokens.none { it in nonChat } && !lower.contains("embedding")
+    }
+
+    /**
+     * PERSISTED ROUTE HEALTH (2026-09-02 live fix). NIM /models is the GLOBAL
+     * catalog, not this key's entitlement — partner slugs appear live but 404
+     * "Function not found for account" forever. Entitlement truth is learned
+     * from the wire and PERSISTED across boots:
+     *   dead   = provider said not-found/no-such-model for THIS key
+     *   served = this id actually produced output for THIS key (floats first)
+     * A successful serve revives a dead id. No hardcoded lists anywhere.
+     * Lives in the companion so buildPhoneCandidates can rank with it.
+     */
+    private object RouteHealth {
+      private lateinit var prefs: android.content.SharedPreferences
+      val dead = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+      val served = java.util.concurrent.ConcurrentHashMap<String, Long>()
+      fun attach(context: android.content.Context) {
+        if (::prefs.isInitialized) return
+        prefs = context.getSharedPreferences("purpclaw_route_health", android.content.Context.MODE_PRIVATE)
+        prefs.getStringSet("perm_dead", emptySet()).orEmpty().forEach { dead[it] = true }
+        prefs.getStringSet("served_rank", emptySet()).orEmpty().forEach { entry ->
+          val parts = entry.split('|')
+          if (parts.size == 2) served[parts[0]] = parts[1].toLongOrNull() ?: 0L
+        }
+      }
+      @Synchronized
+      private fun persist() {
+        if (!::prefs.isInitialized) return
+        prefs.edit()
+          .putStringSet("perm_dead", dead.keys.toSet())
+          .putStringSet("served_rank", served.entries.map { "${it.key}|${it.value}" }.toSet())
+          .apply()
+      }
+      fun markDead(id: String) {
+        if (dead.put(id, true) == null) persist()
+      }
+      fun markServed(id: String) {
+        dead.remove(id)
+        served[id] = System.currentTimeMillis()
+        persist()
+      }
+      fun revive(id: String) {
+        if (dead.remove(id) != null) persist()
+      }
+      fun isDead(id: String) = dead.containsKey(id)
+      fun servedAt(id: String): Long = served[id] ?: 0L
     }
 
     /** Pure classifier used by both live catalogue ingestion and TVG tests. */
@@ -160,7 +205,8 @@ class ProviderRouter(
       requestedModel: String?,
       toolsRequired: Boolean,
       openRouterConfigured: Boolean,
-      quarantined: (String) -> Boolean
+      quarantined: (String) -> Boolean,
+      estimatedPromptTokens: Int = 0
     ): List<String> {
       fun toolEligible(model: CatalogueModel): Boolean = !toolsRequired ||
         model.isToolCapable ||
@@ -175,7 +221,14 @@ class ProviderRouter(
         it.modelClass == "chat" && it.isFree && it.available && it.configured &&
           it.isQualifiedFree && it.pricingPrompt == 0.0 && it.pricingCompletion == 0.0 &&
           isCallableAutoModelId(it.id) && !it.isUserExcludedFromAuto &&
-          !quarantined(it.id) && toolEligible(it)
+          !quarantined(it.id) && toolEligible(it) &&
+          // CONTEXT-FIT LAW (operator 2026-09-02): a model whose advertised
+          // context is smaller than the prompt will 413/400 on the first
+          // request. Filter them out before rotation so a 9,980-token turn
+          // never lands on an 8k-TPM-capable small-context model. 0 means
+          // upstream did not advertise a context — keep the candidate;
+          // truthful failure is better than silent omission.
+          (it.contextLength == 0 || it.contextLength >= estimatedPromptTokens * 13 / 10)
       }
       val requestedRecord = live.firstOrNull { it.id == requestedModel }
       // MULTI-LANE LAW (operator 2026-09-01): AUTO interleaves EVERY gateway
@@ -187,7 +240,15 @@ class ProviderRouter(
       val byProvider = live.groupBy { it.sourceProvider }
         .mapValues { (_, models) ->
           models.filter { it.id != "openrouter/free" }
-            .sortedWith(compareByDescending<CatalogueModel> { it.isToolCapable }.thenByDescending { it.contextLength })
+            // SERVED-FIRST LAW: ids this key has actually served float to the
+            // top of their lane; never-served ids follow by capability. The
+            // first attempt after boot is then the last known-good model,
+            // not an alphabetical partner slug that 404s.
+            .sortedWith(
+              compareByDescending<CatalogueModel> { RouteHealth.servedAt(it.id) }
+                .thenByDescending { it.isToolCapable }
+                .thenByDescending { it.contextLength }
+            )
         }
       val orderedLanes = byProvider.entries
         .sortedWith(compareBy({ lanePriority.indexOf(it.key).let { i -> if (i < 0) lanePriority.size else i } }, { it.key }))
@@ -210,6 +271,11 @@ class ProviderRouter(
 
   // Restored pin survives app kill/relaunch until operator picks AUTO.
   private val prefs = appContext.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+
+  init {
+    // Load persisted entitlement truth (dead/served) before any routing call.
+    RouteHealth.attach(appContext)
+  }
 
   private val httpClient = OkHttpClient.Builder()
     .callTimeout(18, TimeUnit.SECONDS)
@@ -265,11 +331,22 @@ class ProviderRouter(
   fun quarantineModel(id: String) {
     recentFailureQuarantine[id] = System.currentTimeMillis() + QUARANTINE_MS
   }
+
+  // Delegates into the persisted companion store — see RouteHealth above.
+  fun markModelDead(id: String) = RouteHealth.markDead(id)
+  fun markModelServed(id: String) = RouteHealth.markServed(id)
+  fun isModelDead(id: String): Boolean = RouteHealth.isDead(id)
+  fun servedRankOf(id: String): Long = RouteHealth.servedAt(id)
+
   fun isQuarantined(id: String): Boolean {
+    if (RouteHealth.isDead(id)) return true
     val until = recentFailureQuarantine[id] ?: return false
     return System.currentTimeMillis() < until
   }
-  fun clearQuarantine(id: String) = recentFailureQuarantine.remove(id)
+  fun clearQuarantine(id: String) {
+    recentFailureQuarantine.remove(id)
+    RouteHealth.revive(id)
+  }
 
   /** Carries per-call attribution from the caller (Initiator / source ids). */
   @Volatile
@@ -334,6 +411,30 @@ class ProviderRouter(
   }
 
   /**
+   * REASONING HYGIENE LAW (P0 #9, 2026-09-02): model thinking never leaks into
+   * chat content. Extracts DeepSeek-style `reasoning_content` / OpenAI-style
+   * `reasoning` fields AND inline <think>…</think> markup into a separate
+   * reasoning channel; the content string comes back clean. Mirrors the
+   * HomeRuntimeBridge hygiene strip so every lane behaves the same.
+   */
+  private fun parseChoiceMessage(json: JSONObject): Pair<String, String?> {
+    val message = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+      ?: return "" to null
+    val raw = message.optString("content")
+    var reasoning = message.optString("reasoning_content").takeIf { it.isNotBlank() }
+      ?: message.optString("reasoning").takeIf { it.isNotBlank() }
+    if (reasoning.isNullOrBlank()) {
+      reasoning = Regex("<think>([\\s\\S]*?)</think>", RegexOption.IGNORE_CASE)
+        .findAll(raw)
+        .mapNotNull { it.groupValues[1].trim().takeIf(String::isNotEmpty) }
+        .firstOrNull()
+    }
+    var cleaned = Regex("<think>[\\s\\S]*?</think>", RegexOption.IGNORE_CASE).replace(raw, "")
+    cleaned = Regex("^\\s*<think>[\\s\\S]*", RegexOption.IGNORE_CASE).replace(cleaned, "") // unclosed think at start
+    return cleaned.trim() to reasoning?.takeIf { it.isNotBlank() }
+  }
+
+  /**
    * OpenAI-compatible /v1/models fetcher reused for every DIRECT provider
    * (Kimi, Qwen, DeepSeek, OpenAI, Z.ai). MiniMax has its own bespoke
    * endpoint shape and is handled separately.
@@ -345,8 +446,7 @@ class ProviderRouter(
    * response explicitly reports $0 for both prompt and completion.
    */
   private suspend fun refreshOpenAiCompatibleCatalogue(
-    source: ProviderSource,
-    knownChatModelIds: List<String>
+    source: ProviderSource
   ): Int {
     val apiKey = vault.retrieveSecret(source.vaultKey)
     if (apiKey.isNullOrBlank()) {
@@ -459,74 +559,34 @@ class ProviderRouter(
     }
   }
 
-  private fun seedDirectFlow(source: ProviderSource, knownChatModelIds: List<String>) {
-    writeDirectFlow(source, seedDirectProvider(source, knownChatModelIds))
-  }
-
-  private fun seedDirectProvider(source: ProviderSource, ids: List<String>): List<CatalogueModel> =
-    ids.map { id ->
-      CatalogueModel(
-        id = "$source/${id}",
-        name = id,
-        provider = source.name,
-        providerType = ProviderType.DIRECT,
-        sourceProvider = source.name.lowercase().split(" ")[0].replace("(", "").replace(")", ""),
-        description = "${source.name} · default seed (key configured)",
-        contextLength = 0,
-        isFree = false,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 0,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = false,
-        configured = true,
-        available = true,
-        discoveredAtMs = System.currentTimeMillis(),
-        endpointSource = "default_seed",
-        vaultKeyName = source.vaultKey
-      )
-    }
+  // REMOVED (operator 2026-09-02): seedDirectFlow() and seedDirectProvider() —
+  // the per-direct-provider hardcoded default_seed list (Kimi moonshot-v1-*,
+  // Qwen qwen-plus/turbo/max, Deepseek deepseek-chat/reasoner/coder, OpenAI
+  // gpt-4o/4o-mini/4.1, ZAI glm-4.5*, LongCat LongCat-2.0). They were dead
+  // code — refreshOpenAiCompatibleCatalogue never called them — and the
+  // existence of a hardcoded list in the source violated the NO HARDCODED
+  // LISTS law even when unused. The live /models fetch is the sole
+  // authority; empty fetch → empty catalogue.
 
   // DIRECT PROVIDER REFRESH ENTRY POINTS — each is a no-op when the key is
-  // absent. Call from MainViewModel after vault writes.
+  // absent. Call from MainViewModel after vault writes. No seed lists: the
+  // live /models response is the only authority.
   suspend fun refreshKimiCatalogue(): Int =
-    refreshOpenAiCompatibleCatalogue(
-      ProviderSource.KIMI,
-      listOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-k2-0711-preview", "kimi-latest")
-    )
+    refreshOpenAiCompatibleCatalogue(ProviderSource.KIMI)
   suspend fun refreshQwenCatalogue(): Int =
-    refreshOpenAiCompatibleCatalogue(
-      ProviderSource.QWEN,
-      listOf("qwen-plus", "qwen-turbo", "qwen-max", "qwen-long", "qwen2.5-72b-instruct")
-    )
+    refreshOpenAiCompatibleCatalogue(ProviderSource.QWEN)
   suspend fun refreshDeepseekCatalogue(): Int =
-    refreshOpenAiCompatibleCatalogue(
-      ProviderSource.DEEPSEEK,
-      listOf("deepseek-chat", "deepseek-reasoner", "deepseek-coder")
-    )
+    refreshOpenAiCompatibleCatalogue(ProviderSource.DEEPSEEK)
   suspend fun refreshOpenaiCatalogue(): Int =
-    refreshOpenAiCompatibleCatalogue(
-      ProviderSource.OPENAI,
-      listOf("gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3-mini", "o1", "o1-mini")
-    )
+    refreshOpenAiCompatibleCatalogue(ProviderSource.OPENAI)
   suspend fun refreshZaiCatalogue(): Int =
-    refreshOpenAiCompatibleCatalogue(
-      ProviderSource.ZAI,
-      listOf("glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash")
-    )
+    refreshOpenAiCompatibleCatalogue(ProviderSource.ZAI)
   // LONGCAT (2026-08-29): Meituan OpenAI-compatible provider, direct BYO key.
   // Live production proof (2026-08-29): both model discovery and chat are
   // served below /openai/v1. The docs' bare /v1/models path returned HTML 404;
   // /openai/v1/models returned the authenticated LongCat-2.0 catalogue.
   suspend fun refreshLongcatCatalogue(): Int =
-    refreshOpenAiCompatibleCatalogue(
-      ProviderSource.LONGCAT,
-      listOf("LongCat-2.0")
-    )
+    refreshOpenAiCompatibleCatalogue(ProviderSource.LONGCAT)
 
   /**
    * MiniMax refresh — refreshed EVERY boot, but truthfully labelled: MiniMax
@@ -618,8 +678,9 @@ class ProviderRouter(
    * pool — openrouter, nim, groq, cerebras, googleai, cloudflare — no
    * OpenRouter+NIM duopoly. A lane with a missing key simply contributes an
    * empty slice. AUTO NEVER touches a direct provider, no matter what the
-   * operator pinned before. (OpenRouter's AUTO admission is separately held
-   * by OPENROUTER_AUTO_COST_HOLD at the call sites.)
+   * operator pinned before. NO HARDCODED EXCLUSION: every gateway above is
+   * admitted; misbehaviour is handled via the live health cache, not a
+   * build-time list.
    */
   fun queryAllFreeGateways(): List<CatalogueModel> {
     fun laneConfigured(source: ProviderSource): Boolean {
@@ -666,14 +727,12 @@ class ProviderRouter(
    * ranking or copying ids into a second route table.
    */
   fun currentAutoCatalogueCandidates(toolsRequired: Boolean = false): List<CatalogueModel> {
-    val gateways = queryAllFreeGateways().filterNot {
-      OPENROUTER_AUTO_COST_HOLD && it.sourceProvider == "openrouter"
-    }
+    val gateways = queryAllFreeGateways()
     val ids = buildPhoneCandidates(
       gateways = gateways,
       requestedModel = null,
       toolsRequired = toolsRequired,
-      openRouterConfigured = !OPENROUTER_AUTO_COST_HOLD && vault.hasSecret("OPENROUTER_API_KEY"),
+      openRouterConfigured = vault.hasSecret("OPENROUTER_API_KEY"),
       quarantined = ::isQuarantined
     )
     return ids.mapNotNull { id -> gateways.firstOrNull { it.id == id } }
@@ -748,7 +807,10 @@ class ProviderRouter(
   private val userExcludedModels = mutableSetOf<String>()
 
   init {
-    initializeDefaultCatalogue()
+    // NO HARDCODED SEEDS (operator 2026-09-02): the OpenRouter catalogue is empty
+    // until the live /api/v1/models fetch returns. A failed or empty fetch leaves
+    // the catalogue empty — seed lists are NOT authority.
+    _openRouterCatalogue.value = emptyList()
     // MODEL PIN STICKINESS LAW: restore persisted pin before any routing happens.
     val savedProvider = prefs.getString(KEY_PROVIDER, null)
     val savedModel = prefs.getString(KEY_MODEL, null)
@@ -946,18 +1008,20 @@ class ProviderRouter(
     // (openrouter/free -> "Stealth" 502, NIM starcoder2 404, hung free models);
     // we try up to 3 eligible FREE chat models, quarantining dead routes via the
     // health cache, never spinning on auth/quota (account-state, not model-health).
-    val gateways: List<CatalogueModel> = queryAllFreeGateways().filterNot {
-      OPENROUTER_AUTO_COST_HOLD && it.sourceProvider == "openrouter"
-    }
-    if (OPENROUTER_AUTO_COST_HOLD) {
-      Log.w(TAG, "COST_GUARD: OpenRouter excluded from AUTO pending independent charge audit; all other configured free lanes (nim/groq/cerebras/googleai/cloudflare) rotate")
-    }
+    val gateways: List<CatalogueModel> = queryAllFreeGateways()
     val candidates = buildPhoneCandidates(
       gateways = gateways,
       requestedModel = emergencyModel,
       toolsRequired = toolsRequired,
-      openRouterConfigured = !OPENROUTER_AUTO_COST_HOLD && vault.hasSecret("OPENROUTER_API_KEY"),
-      quarantined = ::isQuarantined
+      openRouterConfigured = vault.hasSecret("OPENROUTER_API_KEY"),
+      quarantined = ::isQuarantined,
+      // CONTEXT-FIT LAW: rough char/4 token estimate of the prompt PLUS
+      // system instruction PLUS prior history. The catalogue's per-model
+      // contextLength is the source of truth; we filter candidates whose
+      // advertised context is too small to fit the request rather than
+      // burning a turn on a guaranteed 413.
+      estimatedPromptTokens = (prompt.length + systemInstruction.length +
+        conversationHistory.sumOf { it.first.length + it.second.length }) / 4
     )
 
     if (candidates.isEmpty()) {
@@ -1116,6 +1180,9 @@ class ProviderRouter(
         // SUCCESS — record the served attempt with the ACTUAL served provider/model
         servedProvider = cProvider
         servedModel = cand
+        // SERVED = live entitlement proof: float this id to the front of its
+        // lane and revive it if it was previously marked dead.
+        markModelServed(cand)
         attemptRecords.add(com.example.core.model.AttemptRecord(
           attemptIndex = attemptIdx,
           provider = cProvider,
@@ -1132,7 +1199,12 @@ class ProviderRouter(
           servedProvider = cProvider,
           servedModel = cand,
           fallbackOccurred = attemptIdx > 0,
-          fallbackPath = candidates.subList(0, attemptIdx).toList(),
+          // SUCCESS-PATH CRASH FIX (2026-09-02, caught live): rotation can
+          // advance attemptIdx past the candidate list length (quarantines and
+          // circuit changes shrink eligibility mid-turn). An unclamped subList
+          // threw IndexOutOfBoundsException exactly when a model SERVED —
+          // crashing the app at the moment of victory and murdering the turn.
+          fallbackPath = candidates.subList(0, attemptIdx.coerceAtMost(candidates.size)).toList(),
           routingReason = if (attemptIdx == 0) "AUTO_FIRST_ELIGIBLE" else "AUTO_ROTATION_FROM_$attemptIdx",
           qualityGateResult = "PASS",
           attempts = attemptRecords
@@ -1166,6 +1238,28 @@ class ProviderRouter(
       // oversized prompt) rotate to the next candidate — they never recover in
       // 60s and never justify killing the whole AUTO turn.
       if (failureClass in setOf(SharedQuotaLedger.FailureClass.AUTH_MISSING_KEY, SharedQuotaLedger.FailureClass.AUTH_REJECTED, SharedQuotaLedger.FailureClass.AUTH_FORBIDDEN, SharedQuotaLedger.FailureClass.RATE_LIMITED, SharedQuotaLedger.FailureClass.PROVIDER_QUOTA_EXHAUSTED, SharedQuotaLedger.FailureClass.DEAD_ENDPOINT, SharedQuotaLedger.FailureClass.TOOLS_UNSUPPORTED, SharedQuotaLedger.FailureClass.PROMPT_TOO_LARGE, SharedQuotaLedger.FailureClass.CONTEXT_TOO_SMALL) || perModelPermanent) {
+        // NO-REPEAT LAW (2026-09-02 live fix): dead endpoints, tool-unsupported
+        // models and other per-model permanent failures are quarantined HERE —
+        // rotating without quarantining made every turn re-try the same dead
+        // NIM/Groq/Cloudflare ids until exhaustion. A provider-level quota
+        // wall (Cerebras 402) opens that lane's circuit so it stops firing
+        // once per turn too.
+        if (failureClass == SharedQuotaLedger.FailureClass.DEAD_ENDPOINT ||
+          failureClass == SharedQuotaLedger.FailureClass.TOOLS_UNSUPPORTED ||
+          perModelPermanent
+        ) {
+          quarantineModel(cand)
+          // Persist entitlement-dead across boots — see PERSISTED ROUTE HEALTH.
+          if (failureClass == SharedQuotaLedger.FailureClass.DEAD_ENDPOINT || perModelPermanent) {
+            markModelDead(cand)
+          }
+        }
+        if (failureClass == SharedQuotaLedger.FailureClass.PROVIDER_QUOTA_EXHAUSTED) {
+          runCatching { SharedQuotaLedger.recordQuotaExhausted(cProvider) }
+        }
+        if (failureClass == SharedQuotaLedger.FailureClass.RATE_LIMITED) {
+          runCatching { SharedQuotaLedger.recordRateLimit(cProvider) }
+        }
         attemptRecords.add(com.example.core.model.AttemptRecord(
           attemptIndex = attemptIdx, provider = cProvider, model = cand,
           outcome = fcOutcome, failureClass = failureClass.name, statusCode = res.statusCode,
@@ -1178,6 +1272,13 @@ class ProviderRouter(
       }
       // Transport/dead failure: quarantine + rotate to next healthy route.
       quarantineModel(cand)
+      // "No such model" on a 400 is the same entitlement lie as a 404 function
+      // miss — persist it dead so it never wastes another first attempt.
+      if (cErr?.contains("no such model", ignoreCase = true) == true ||
+        cErr?.contains("function '", ignoreCase = true) == true
+      ) {
+        markModelDead(cand)
+      }
       fallbackTrace.add("candidate '$cand' failed: $cErr — rotating")
       attemptRecords.add(com.example.core.model.AttemptRecord(
         attemptIndex = attemptIdx, provider = cProvider, model = cand,
@@ -1385,8 +1486,7 @@ class ProviderRouter(
         )
       }
       val json = JSONObject(body)
-      val text = json.optJSONArray("choices")?.optJSONObject(0)
-        ?.optJSONObject("message")?.optString("content").orEmpty()
+      val (text, reasoning) = parseChoiceMessage(json)
       val usage = json.optJSONObject("usage")
       val lat = System.currentTimeMillis() - startTime
       persistDispatchReceipt(
@@ -1401,7 +1501,8 @@ class ProviderRouter(
         content = text,
         providerModel = modelId,
         tokenCount = usage?.optInt("total_tokens") ?: (text.split(" ").size + prompt.split(" ").size),
-        latencyMs = lat
+        latencyMs = lat,
+        reasoning = reasoning
       )
     } catch (e: Exception) {
       Log.e(TAG, "${source.name} call failed: ${e.message}", e)
@@ -1569,9 +1670,28 @@ class ProviderRouter(
         val list = mutableListOf<CatalogueModel>()
         for (i in 0 until arr.length()) {
           val m = arr.optJSONObject(i) ?: continue
-          val nativeId = m.optString("id").ifBlank { m.optString("name") }
-          if (nativeId.isBlank()) continue
+          // ID-FIELD LAW (2026-09-02 live fix): Cloudflare v4 /models/search
+          // returns id=<catalog UUID> and name=@cf/<slug> — sending the UUID
+          // produced "No such model eed32bc1-…" on every attempt. For
+          // Cloudflare the slug lives in `name`; other gateways keep id-first
+          // (their `name` is a display label). A UUID-shaped id is never legal.
+          var nativeId = if (source == ProviderSource.CLOUDFLARE) {
+            m.optString("name").ifBlank { m.optString("id") }
+          } else {
+            m.optString("id").ifBlank { m.optString("name") }
+          }
+          if (UUID_MODEL_ID.matches(nativeId)) nativeId = m.optString("name")
+          if (nativeId.isBlank() || UUID_MODEL_ID.matches(nativeId)) continue
           if (!isGatewayChatModelId(nativeId)) continue
+          // TASK-METADATA LAW (2026-09-02 live fix): Cloudflare v4 search items
+          // carry a live `task.name`. Sending a non-text-generation model to
+          // /ai/v1/chat/completions fails with a native-schema error
+          // ("required properties at '/audio'…"). Trust the provider's own
+          // task metadata over filename-token guessing when it exists.
+          if (source == ProviderSource.CLOUDFLARE) {
+            val taskName = m.optJSONObject("task")?.optString("name").orEmpty().lowercase()
+            if (taskName.isNotBlank() && !taskName.contains("text generation")) continue
+          }
           list.add(
             CatalogueModel(
               id = "$laneTag/$nativeId",
@@ -1791,8 +1911,7 @@ class ProviderRouter(
         )
       }
       val json = JSONObject(body)
-      val text = json.optJSONArray("choices")?.optJSONObject(0)
-        ?.optJSONObject("message")?.optString("content").orEmpty()
+      val (text, reasoning) = parseChoiceMessage(json)
       val usage = json.optJSONObject("usage")
       val lat = System.currentTimeMillis() - startTime
       persistDispatchReceipt(
@@ -1808,7 +1927,8 @@ class ProviderRouter(
         providerModel = modelName,
         tokenCount = usage?.optInt("total_tokens") ?: (text.split(" ").size + prompt.split(" ").size),
         latencyMs = lat,
-        toolCalls = parseToolCalls(json)
+        toolCalls = parseToolCalls(json),
+        reasoning = reasoning
       )
     } catch (e: Exception) {
       val lat = System.currentTimeMillis() - startTime
@@ -2429,176 +2549,9 @@ class ProviderRouter(
     // daily models must come from the successful live endpoint response.
   }
 
-  private fun initializeDefaultCatalogue() {
-    val defaultList = listOf(
-      CatalogueModel(
-        id = "deepseek/deepseek-chat-v3-0324:free",
-        name = "DeepSeek: V3 0324 (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Open-weights MoE generalist, strong tool-calling.",
-        contextLength = 163840,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 900L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = true,
-        exclusionReason = null,
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-      CatalogueModel(
-        id = "deepseek/deepseek-r1-0528:free",
-        name = "DeepSeek: R1 0528 (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Open-weights reasoning model with chain-of-thought.",
-        contextLength = 163840,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = true,
-        modelClass = "chat",
-        avgLatencyMs = 1800L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = true,
-        exclusionReason = null,
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-      CatalogueModel(
-        id = "meta-llama/llama-3.3-70b-instruct:free",
-        name = "Meta: Llama 3.3 70B Instruct (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Flagship open-weights generalist instruct model.",
-        contextLength = 131072,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 850L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = true,
-        exclusionReason = null,
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-      CatalogueModel(
-        id = "qwen/qwen-2.5-72b-instruct:free",
-        name = "Qwen: Qwen 2.5 72B Instruct (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Large open-weights instruct model, strong multilingual.",
-        contextLength = 32768,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 800L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = true,
-        exclusionReason = null,
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-      CatalogueModel(
-        id = "mistralai/mistral-small-24b-instruct-2501:free",
-        name = "Mistral: Small 24B Instruct 2501 (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Efficient mid-size instruct from Mistral.",
-        contextLength = 32768,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 700L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = true,
-        exclusionReason = null,
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-      CatalogueModel(
-        id = "google/gemma-3-27b-it:free",
-        name = "Google: Gemma 3 27B (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Open-weights Gemma 3 instruct, multimodal-capable family.",
-        contextLength = 131072,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 750L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = true,
-        exclusionReason = null,
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-      CatalogueModel(
-        id = "microsoft/phi-4:free",
-        name = "Microsoft: Phi 4 (Free)",
-        provider = "openrouter",
-        providerType = ProviderType.GATEWAY,
-        sourceProvider = "openrouter",
-        description = "Small high-quality reasoning-focused model.",
-        contextLength = 16384,
-        isFree = true,
-        isToolCapable = true,
-        isVisionCapable = false,
-        isReasoningCapable = false,
-        modelClass = "chat",
-        avgLatencyMs = 500L,
-        healthStatus = "HEALTHY",
-        pricingPrompt = 0.0,
-        pricingCompletion = 0.0,
-        isQualifiedFree = false,
-        exclusionReason = "excluded: context < 32K",
-        endpointSource = "default_seed",
-        vaultKeyName = ProviderSource.OPENROUTER.vaultKey
-      ),
-
-      // Verified against live https://openrouter.ai/api/v1/models on 2026-08-26.
-      // GEMINI PURGED: no Google cloud lanes, ever — local Gemma lane only.
-    )
-
-    // Historical seeds remain in source for audit/provenance only. They are
-    // not runtime candidates: free catalogues rotate daily and live discovery
-    // is authoritative.
-    _openRouterCatalogue.value = emptyList<CatalogueModel>()
-    /*defaultList.map { model ->
-      model.copy(
-        isUserPreferredInAuto = userPreferredModels.contains(model.id),
-        isUserExcludedFromAuto = userExcludedModels.contains(model.id)
-      )
-    }*/
-  }
+  // REMOVED (operator 2026-09-02): initializeDefaultCatalogue() and its 8
+  // hardcoded OpenRouter default_seed models. The function only ever set the
+  // catalogue to emptyList(), and the hardcoded list was a back-door that
+  // violated the NO HARDCODED LISTS law. The live /api/v1/models fetch is
+  // the sole authority — empty fetch → empty catalogue, never a fallback.
 }

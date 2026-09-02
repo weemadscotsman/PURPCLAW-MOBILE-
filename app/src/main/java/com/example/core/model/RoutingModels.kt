@@ -183,8 +183,10 @@ data class MiniMaxCapabilityStatus(
  * - available: live health flag (mirrors healthStatus but here for routing).
  * - discoveredAtMs: when this id was last seen in the live upstream catalogue.
  *   Lets us auto-retire ids that vanish between refreshes (no hard-coded lists).
- * - endpointSource: "live_catalog" (pulled from upstream API just now) or
- *   "default_seed" (boot-time fallback so the selector is never empty).
+ * - endpointSource: "live_catalog" (pulled from upstream API just now),
+ *   "attested_allowlist_2026-08-29" (MiniMax M-family, operator-attested
+ *   because api.minimax.io exposes no OpenAI-compatible /v1/models for chat —
+ *   never auto-populated from a hardcoded seed list).
  * - vaultKeyName: the vault key this provider reads (null for gateways when
  *   the key is optional, populated for every direct provider).
  */
@@ -231,9 +233,21 @@ enum class ProviderSource(val displayName: String, val vaultKey: String, val bas
   QWEN("Qwen (DashScope)", "QWEN_API_KEY", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
   DEEPSEEK("DeepSeek", "DEEPSEEK_API_KEY", "https://api.deepseek.com/v1"),
   OPENAI("OpenAI", "OPENAI_API_KEY", "https://api.openai.com/v1"),
-  ZAI("Z.ai (GLM)", "ZAI_API_KEY", "https://api.z.ai/v1");
+  ZAI("Z.ai (GLM)", "ZAI_API_KEY", "https://api.z.ai/v1"),
+  // Operator order 2026-09-01: all supported FREE providers rotate in AUTO —
+  // no OpenRouter+NIM duopoly. All four are OpenAI-compatible chat transports.
+  GROQ("Groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1"),
+  CEREBRAS("Cerebras", "CEREBRAS_API_KEY", "https://api.cerebras.ai/v1"),
+  // Supersedes the google-purge law for THIS key lane only: Google AI Studio
+  // free tier via its OpenAI-compatible endpoint. Stray "google/" ids from
+  // other gateways remain purged in the execute layer.
+  GOOGLE_AI("Google AI Studio", "GOOGLE_AI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai"),
+  // Cloudflare also requires CLOUDFLARE_ACCOUNT_ID; effective base URL is
+  // /client/v4/accounts/{id}/ai/v1 and is assembled at call time.
+  CLOUDFLARE("Cloudflare Workers AI", "CLOUDFLARE_API_KEY", "https://api.cloudflare.com/client/v4");
 
-  val isGateway: Boolean get() = this == OPENROUTER || this == NIM
+  val isGateway: Boolean get() = this == OPENROUTER || this == NIM ||
+    this == GROQ || this == CEREBRAS || this == GOOGLE_AI || this == CLOUDFLARE
 }
 
 /**
