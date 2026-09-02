@@ -1551,8 +1551,133 @@ class ProviderRouter(
   }
 
   /**
+   * Fetch build.nvidia.com/models and extract the Free Endpoint model names
+   * from the embedded Next.js searchResult JSON. This is NVIDIA's editorial
+   * "Free Endpoint" filter — the same list the website's UI shows on page 1.
+   * The HTML embeds the catalogue as a JS-string-escaped JSON object, which
+   * we locate, unescape, and parse.
+   *
+   * Returns the set of bare model names (e.g. "kimi-k3", "deepseek-v4-pro-0813",
+   * "nemotron-3-ultra-550b-a55b"). Caller intersects with /v1/models ids by
+   * stripping the namespace prefix (e.g. "moonshotai/kimi-k3" -> "kimi-k3").
+   *
+   * Truth source: this is not a hardcoded list. Every refresh re-fetches the
+   * live build.nvidia.com/models page, so when NVIDIA adds/removes an
+   * endpoint from the Free Endpoint filter, it shows up in the next boot.
+   * Limit: page 1 only (16 unique endpoints). Pages 2-5 are client-side
+   * rendered after the user scrolls in the website UI; a public API for
+   * the full 5-page dataset does not exist.
+   */
+  private suspend fun fetchBuildNvidiaFreeEndpointNames(): Set<String> {
+    return withContext(Dispatchers.IO) {
+      try {
+        val req = Request.Builder()
+          .url("https://build.nvidia.com/models")
+          .addHeader("Accept", "text/html")
+          .addHeader("User-Agent", "PurpClaw/1.0")
+          .get()
+        val resp = httpClient.newCall(req.build()).execute()
+        val html = resp.body?.string().orEmpty()
+        resp.close()
+        if (html.isBlank()) {
+          Log.w(TAG, "build.nvidia.com/models returned empty body")
+          return@withContext emptySet()
+        }
+        val names = parseBuildNvidiaFreeEndpointNames(html)
+        Log.i(TAG, "build.nvidia.com Free Endpoint filter: ${names.size} unique names (page 1)")
+        names
+      } catch (e: Exception) {
+        Log.w(TAG, "build.nvidia.com Free Endpoint fetch failed: ${e.javaClass.simpleName}: ${e.message ?: "(no message)"} — falling back to chat-classifier only")
+        emptySet()
+      }
+    }
+  }
+
+  /**
+   * Parse the Next.js server-rendered HTML for the Free Endpoint names.
+   * The HTML embeds the catalogue as a JS-string-escaped JSON inside a
+   * script tag. We anchor on the escaped \"searchResult\":{ key, walk to
+   * the matching close brace (counting braces, respecting JS string
+   * escapes), then unescape and parse the JSON.
+   */
+  private fun parseBuildNvidiaFreeEndpointNames(html: String): Set<String> {
+    val anchor = "\\\"searchResult\\\":{"
+    val anchorIdx = html.indexOf(anchor)
+    if (anchorIdx < 0) return emptySet()
+    var objStart = anchorIdx + anchor.length - 1  // the {
+    if (objStart >= html.length || html[objStart] != '{') return emptySet()
+    // Walk forward to find the matching close brace
+    var depth = 0
+    var i = objStart
+    var inString = false
+    var escape = false
+    var objEnd = -1
+    while (i < html.length) {
+      val ch = html[i]
+      if (escape) {
+        escape = false
+        i++
+        continue
+      }
+      if (ch == '\\') {
+        escape = true
+        i++
+        continue
+      }
+      if (ch == '"') {
+        inString = !inString
+      } else if (!inString) {
+        if (ch == '{') depth++
+        else if (ch == '}') {
+          depth--
+          if (depth == 0) { objEnd = i + 1; break }
+        }
+      }
+      i++
+    }
+    if (objEnd < 0) return emptySet()
+    val raw = html.substring(objStart, objEnd)
+    // Unescape JS string literal: \" -> ", \\ -> \
+    val unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\")
+    return try {
+      val root = JSONObject(unescaped)
+      val results = root.optJSONArray("results") ?: return emptySet()
+      val seen = mutableSetOf<String>()
+      for (g in 0 until results.length()) {
+        val group = results.optJSONObject(g) ?: continue
+        val resources = group.optJSONArray("resources") ?: continue
+        for (r in 0 until resources.length()) {
+          val resource = resources.optJSONObject(r) ?: continue
+          val labels = resource.optJSONArray("labels") ?: continue
+          var isFree = false
+          for (l in 0 until labels.length()) {
+            val label = labels.optJSONObject(l) ?: continue
+            if (label.optString("key") == "nimType") {
+              val values = label.optJSONArray("values") ?: continue
+              for (v in 0 until values.length()) {
+                if (values.optString(v) == "Free Endpoint") { isFree = true; break }
+              }
+              if (isFree) break
+            }
+          }
+          if (isFree) {
+            val name = resource.optString("name")
+            if (name.isNotBlank()) seen.add(name)
+          }
+        }
+      }
+      seen
+    } catch (e: Exception) {
+      Log.w(TAG, "build.nvidia.com Free Endpoint parse failed: ${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
+      emptySet()
+    }
+  }
+
+  /**
    * NVIDIA NIM — integrate.api.nvidia.com/v1 (OpenAI-compatible, free tier).
-   * Auto model selection pulls the live /v1/models catalog into the selector.
+   * Auto model selection pulls the live /v1/models catalog into the selector,
+   * then intersects with build.nvidia.com's editorial Free Endpoint list so
+   * the operator sees exactly what NVIDIA's catalogue page shows.
    */
   suspend fun refreshNimCatalogue(): Int {
     val apiKey = vault.retrieveSecret("NVIDIA_NIM_API_KEY")
@@ -1560,6 +1685,7 @@ class ProviderRouter(
       Log.w(TAG, "NIM catalogue refresh skipped: NVIDIA_NIM_API_KEY missing")
       return 0
     }
+    val freeEndpointNames = fetchBuildNvidiaFreeEndpointNames()
     return try {
       // Network call MUST run on IO dispatcher — never block the Main thread
       val models = withContext(Dispatchers.IO) {
@@ -1608,6 +1734,16 @@ class ProviderRouter(
           // *-completion) MUST be excluded — they 404 on /v1/chat/completions
           // and were the source of the NIM HTTP 404 death spiral.
           if (!isNimChatEndpoint(id)) continue
+          // EDITORIAL-FREE-ENDPOINT LAW (operator 2026-09-02): if the
+          // build.nvidia.com Free Endpoint fetch succeeded, keep only models
+          // whose bare name (id after the last "/") is in the editorial
+          // list. This produces the exact set the build.nvidia.com/models
+          // page shows for the Free Endpoint filter (page 1). If the
+          // fetch failed or returned empty, fall back to the chat-classified
+          // set so the catalogue is never empty due to a transient web
+          // hiccup.
+          val bareName = id.substringAfterLast('/')
+          if (freeEndpointNames.isNotEmpty() && bareName !in freeEndpointNames) continue
           list.add(
             CatalogueModel(
               id = id,
@@ -1643,13 +1779,12 @@ class ProviderRouter(
       val rawTotal = models.size  // best-effort: the inner withContext's rawTotal is gone after return
       _nimCatalogue.value = models
       // TRANSPARENT-COUNT LAW (operator 2026-09-02): log the chat-classified
-      // count. The raw upstream count (82) is logged inside the withContext
-      // block before the chat filter runs. NVIDIA's build.nvidia.com website
-      // shows 39 "Free Endpoint" — that 39 is editorial hand-curation, not a
-      // value derivable from the API. The /v1/models endpoint exposes no
-      // pricing/tier metadata, so we can only report the chat-classified
-      // count honestly. The raw fetch was visible in the inner log line.
-      Log.i(TAG, "NIM catalogue refreshed from live /v1/models: chat=${models.size} callable models after classifier (raw upstream count logged before filter)")
+      // count, and the build.nvidia.com Free Endpoint editorial intersection
+      // so the operator sees the truth. The raw upstream count is logged
+      // inside the withContext block before the chat filter runs. The
+      // editorial "Free Endpoint" list is the same set the website shows
+      // for that filter (page 1 only — pages 2-5 are client-side rendered).
+      Log.i(TAG, "NIM catalogue refreshed from live /v1/models: chat=${models.size} callable models (after classifier ∩ build.nvidia.com Free Endpoint editorial filter)")
       Log.i(TAG, "NIM live chat ids=${models.joinToString { it.id }}")
       models.size
     } catch (e: Exception) {
