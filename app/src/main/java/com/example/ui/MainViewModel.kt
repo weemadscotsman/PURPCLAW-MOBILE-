@@ -2305,8 +2305,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           "Never reference the Home PC as available, and never route Android-local " +
           "actions through it."
       }
+      // Hydrate one canonical Room memory snapshot for EVERY provider/model.
+      val canonicalMemoryBlock = memoryGateway.buildCanonicalLayerContext(executionPrompt)
       val systemPrompt =
-        soul.bundledIdentityBlock + "\n\n" + homeStatusBlock + "\n\n" + runtimeCtx.toPromptBlock()
+        soul.bundledIdentityBlock + "\n\n" + canonicalMemoryBlock + "\n\n" +
+        homeStatusBlock + "\n\n" + runtimeCtx.toPromptBlock()
 
       // CONTINUITY LAW: send the real conversation chain, not just the latest
       // message. Pair each assistant reply with the user message that prompted
@@ -2403,6 +2406,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // plus full-system envelope so nothing lands behind a review gate.
         val homeChat = HomeRuntimeBridge.chat(
           message = buildString {
+            append(canonicalMemoryBlock).append("\n\n")
             if (receiptBlock.isNotEmpty()) append(receiptBlock).append("\n")
             if (toolChainPrefix.isNotEmpty()) append(toolChainPrefix)
             append(executionPrompt)
@@ -2499,7 +2503,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           // Direct call died — escalate to home relay once as a safety net.
           // Stamps HOME in the receipt so the truth in the pill stays accurate.
           val homeChat = HomeRuntimeBridge.chat(
-            message = if (toolChainPrefix.isNotEmpty()) toolChainPrefix + executionPrompt else executionPrompt,
+            message = canonicalMemoryBlock + "\n\n" +
+              (if (toolChainPrefix.isNotEmpty()) toolChainPrefix + executionPrompt else executionPrompt),
             sessionId = _activeSessionId.value,
             mode = currentMode.name,
             executionIntent = currentMode == InteractionMode.WORK,
