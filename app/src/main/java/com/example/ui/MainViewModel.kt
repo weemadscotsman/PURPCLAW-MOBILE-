@@ -1120,7 +1120,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // WEAVE BLOCK WIRING: expose buildWeaveBlock through the council's
     // memoryWeaveProvider so seats hydrate from the live 7-layer weave.
     getOrCreatePodcastEngine().memoryWeaveProvider = { topic ->
-      memoryGateway.buildWeaveBlock(topic)
+      memoryGateway.buildCanonicalLayerContext(topic)
     }
     // SELF-HEAL: drop entries that can no longer decrypt (reinstall killed the
     // Keystore master key) BEFORE seeding, so BuildConfig re-seeds them.
