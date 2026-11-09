@@ -101,6 +101,17 @@ class MemoryGateway(private val memoryDao: MemoryDao) {
     return rows.take(n).map { "[${it.key}] ${it.content}" }
   }
 
+  /** Canonical seven-layer Room snapshot shared by every provider. */
+  suspend fun buildCanonicalLayerContext(topic: String): String {
+    val records = allMemoryItems.first().map { row ->
+      MemoryWeaveRecord(
+        layer = row.layer, key = row.key, content = row.content,
+        score = row.score, timestamp = row.timestamp, pinned = row.isPinned
+      )
+    }
+    return SevenLayerWeaveFormatter.render(topic, records)
+  }
+
   /** The full 7-layer weave as one pre-rendered prompt block for a seat. */
   suspend fun buildWeaveBlock(topic: String): String = buildString {
     appendLine("[MEMORY WEAVE — 7 layers, honest empties]")
